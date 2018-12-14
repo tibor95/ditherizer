@@ -1,8 +1,6 @@
 from scipy import misc
 import numpy
 import argparse
-#from colormath.color_objects import LabColor, sRGBColor
-#from colormath.color_conversions import convert_color
 from itertools import combinations_with_replacement, permutations, product
 from colormath.color_diff import delta_e_cie2000
 from random import randint, choice, shuffle
@@ -13,21 +11,19 @@ import operator
 
 class ChannelValues():
     def __init__(self):
-        #self.data = {1: 0, 2:20, 3: 60, 4:110, 5: 180, 6:255}
-        self.data = {key+1:expand(value) for key, value in enumerate(map(lambda x: float(x)/9, range(10)))}
+        self.data = {key+1:expand(value) for key, value in enumerate(map(lambda x: float(x)/14, range(15)))}
     def get_random(self):
         return self.data[randint(1,len(self.data))]
     def get_neighbours(self, value):
         for k,v in self.data.iteritems():
             if value == v:
                 results = []
-                for x in [-2, -1, 1, 2]:
+                for x in [-3, -2, -1, 1, 2, 3]:
                     try:
                         results.append(self.data[k + x])
                     except:
                         pass
 
-                #print "returning {} for {}".format(results, value)
                 return results
         raise ValueError("ColorValues error")
 
@@ -61,22 +57,36 @@ class ArrayImage():
                 self.data[x_tmp][y_tmp][8] = 0
         #print "image imported to the array"
 
+    def reset_colors_count(self):
+        for col in self.work_colors:
+            col.count = 0
+        #for col in self.final_colors:
+        #    col.count = 0
     def populate_final_statistics(self):
         self.final_colors_stat = {}
         for i, col in enumerate(self.final_colors):
             self.final_colors_stat[i] = col.count
+
+    def populate_work_statistics(self):
+        self.work_colors_stat = {}
+        for i, col in enumerate(self.work_colors):
+            self.work_colors_stat[i] = col.count
         #print "Final colors stat: ", self.final_colors_stat
     def get_lowest_freq_color(self, comparator, tresh = 0):
-        self.populate_final_statistics()
+        comp_str = 'most frequent' if comparator == operator.ge else 'least frequent'
+        self.populate_work_statistics()
         least_pos = None
         least_freq = None
-        for k,v in self.final_colors_stat.iteritems():
+        for k,v in self.work_colors_stat.iteritems():
             if least_freq is None or comparator(v, least_freq):
+                #print "  DEBUG using {}  {}".format(k, v)
                 least_freq = v
                 least_pos = k
-        #print "considering pos: {}, freq.: {}, tresh: {}".format(least_pos, least_freq, tresh)
+            #else:
+                #print "  DEBUG not using {}  {}".format(k, v)
+        #print "   considering {} on  pos: {}, freq.: {}, tresh: {}".format(comp_str, least_pos, least_freq, tresh)
         if comparator(least_freq, tresh):
-            #print "returning pos: {}, freq.: {}, tresh: {}".format(least_pos, least_freq, tresh)
+            #print "  returning {} on pos: {}, freq.: {}, tresh: {}".format(comp_str, least_pos, least_freq, tresh)
             return least_pos
         return None
     def set_output_filename(self, name):
@@ -96,8 +106,10 @@ class ArrayImage():
         #print self.colors
     def colors_to_final(self):
         self.final_colors = copy.deepcopy(self.work_colors)
+        #print "DEBUG count transfer to final ", id(self.final_colors), self.final_colors[0].count, id(self.work_colors), self.work_colors[0].count
     def final_colors_to_work(self):
         self.work_colors = copy.deepcopy(self.final_colors)
+        #print "DEBUG count transfer ",id(self.final_colors), self.final_colors[0].count, id(self.work_colors), self.work_colors[0].count
     def mutate_rgb_tupple(self, old_rgb):
         new_rgb = list(old_rgb)
         src = [0,1,2]
@@ -111,8 +123,9 @@ class ArrayImage():
         self.work_colors = copy.deepcopy(self.final_colors)
 
         preferred_candidate = self.get_lowest_freq_color(operator.le, tresh=self.x * self.y / len(self.final_colors) / 3)
+        #self.get_lowest_freq_color(operator.ge, tresh=self.x * self.y / len(self.final_colors) / 3)
 
-        if preferred_candidate is None:
+        if preferred_candidate is None or randint(0,3) == 0:
             #mutating random color
             col_to_mutate = randint(0, len(self.final_colors) - 1)
             #channel_to_mutate = randint(0, 2)
@@ -123,20 +136,28 @@ class ArrayImage():
             self.work_colors[col_to_mutate] = ColorValues(new_rgb)
         else:
             #mutating existing color
-            if randint(0,5) == 0:
+            if randint(0,1) == 0:
                 source_color = self.get_lowest_freq_color(operator.ge)
+                if source_color == preferred_candidate:
+                    print "ERROR: {} == {}".format(str(source_color), str(preferred_candidate))
+                    sys.exit()
             else:
                 source_color = preferred_candidate
 
             rgb = self.final_colors[source_color].get_big_tuple()
             new_rgb = self.mutate_rgb_tupple(rgb)
-            print " Mutating {} -> {}: {}  ->  {}".format(source_color, preferred_candidate, rgb, new_rgb)
+            if source_color != preferred_candidate:
+                print " Mutating {} -> {}: {}  ->  {}".format(source_color, preferred_candidate, rgb, new_rgb)
+            else:
+                print " Mutating {}: {}  ->  {}".format(preferred_candidate, rgb, new_rgb)
             self.work_colors[preferred_candidate] = ColorValues(new_rgb)
         #do we have natural candidate?
 
 
 
     def dither(self, quiet = False):
+        self.reset_colors_count()
+
         for x_tmp in range(self.x):
             if quiet == False and x_tmp % 100 == 0:
                 print " dithering: ",x_tmp
@@ -180,7 +201,6 @@ class ArrayImage():
         #     [-1,1,3]
         #],
         }
-        #print propagation_sample[(x+y)%2]
         total_weight = sum([item[2] for item in propagation_sample[(x+y)%2]])
         for item in propagation_sample[(x+y)%2]:
             weight = float(item[2]) / total_weight
@@ -193,10 +213,10 @@ class ArrayImage():
         self.data[x][y][4] -= g
         self.data[x][y][5] -= b
     def get_best_color(self, r,g,b ):
-        avg = (r + g + b) / 3
-        r_diff = avg - r
-        g_diff = avg - g
-        b_diff = avg - b
+        #avg = (r + g + b) / 3
+        #r_diff = avg - r
+        #g_diff = avg - g
+        #b_diff = avg - b
         best_diff = 100000000
         best_col = None
         #lab_color = LabColor(l,a,b)
@@ -212,12 +232,7 @@ class ArrayImage():
         total = pow(col1[0] - col2[0], 2)# * (1+weights[0])
         total += pow(col1[1] - col2[1], 2)# * (1+weights[1])
         total += pow(col1[2] - col2[2], 2)# * (1+weights[2])
-        try:
-            total += pow(col1[3] - col2[3], 2)# * (1+weights[2])
-        except:
-            pass
         return total
-        #return abs(col.lab_l - l) + abs(col.lab_a - a) + abs(col.lab_b - b)
     def set_new_color(self, x, y  , color_tupple):
         self.data[x][y][6] = color_tupple[0]
         self.data[x][y][7] = color_tupple[1]
@@ -251,7 +266,6 @@ class ArrayImage():
                 self.new_image[renderdata[0], renderdata[1], 0] = renderdata[2][0]
                 self.new_image[renderdata[0], renderdata[1], 1] = renderdata[2][1]
                 self.new_image[renderdata[0], renderdata[1], 2] = renderdata[2][2]
-                #print renderdata
 
         misc.imsave(target_destination, self.new_image)
     def clean_errors(self):
@@ -385,7 +399,6 @@ def get_random_color(current_colors = None):
 def get_random_colors(colors_count):
     #print "genrating {} colors".format(colors_count)
     random_colors = []
-    #random_colors.extend([ColorValues(list(item)) for item in  list(product([0, 50, 255], repeat = 3))])
     for x in range(colors_count):
         best_dist = -1
         distant_color = None
@@ -422,7 +435,7 @@ cv = ChannelValues()
 
 for file_tmp in infiles:
 
-    print file_tmp
+    print "Doing: {}".format(file_tmp)
 
     inimage = misc.imread(file_tmp)
     inimage = misc.imresize(inimage, percentage / 2)
@@ -447,7 +460,7 @@ for file_tmp in infiles:
             if least_frequency > col.count:
                 least_frequency = col.count
                 least_used = i
-            print "  {:<13} :{:>8}".format(col, col.count)
+            print "  {:<13} :{:>8}   {:>5.2f}%".format(col, col.count, 100 * float(col.count) / work_image.x / work_image.y)
         #print " [{:>3}] Achieved {} vs. needed:  {}".format(x, least_frequency, float(work_image.x) * work_image.y / 2 / colors)
         current_error = float(work_image.error_sum) / work_image.x / work_image.y
         print " [{:>3}] Actual error: {:.3f}% (best: {:.3f}, last change: {} ago)".format(x, current_error, best_achieved_error, x - last_change)
@@ -460,8 +473,6 @@ for file_tmp in infiles:
 
             work_image.colors_to_final()
             last_change = x
-            #moving stat to final_colors_stat
-            #self.populate_final_statistics()
 
         else:
             work_image.final_colors_to_work()
