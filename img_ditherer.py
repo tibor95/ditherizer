@@ -114,7 +114,8 @@ class ArrayImage():
         new_rgb = list(old_rgb)
         src = [0,1,2]
         shuffle(src)
-        channels_to_mutate = src[:randint(1,3)]
+        #choice([1, 1, 1, 2, 2, 3])
+        channels_to_mutate = src[:choice([1,1,1,2,2,3])]
         for ch in channels_to_mutate:
             new_rgb[ch] = choice(cv.get_neighbours(new_rgb[ch]))
         return tuple(new_rgb)
@@ -438,7 +439,9 @@ for file_tmp in infiles:
     print "Doing: {}".format(file_tmp)
 
     inimage = misc.imread(file_tmp)
-    inimage = misc.imresize(inimage, percentage / 2)
+    if percentage != 100:
+        inimage = misc.imresize(inimage, percentage)
+        print " ... resizing to {}%, new dimensions: {}x{}".format(percentage, inimage.shape[0], inimage.shape[1])
 
     work_image = ArrayImage(inimage)
     work_image.set_output_filename(file_tmp.rsplit('.',1)[0])
@@ -460,7 +463,7 @@ for file_tmp in infiles:
             if least_frequency > col.count:
                 least_frequency = col.count
                 least_used = i
-            print "  {:<13} :{:>8}   {:>5.2f}%".format(col, col.count, 100 * float(col.count) / work_image.x / work_image.y)
+            print " {:>2} {:<13} :{:>8}   {:>5.2f}%".format(i, col, col.count, 100 * float(col.count) / work_image.x / work_image.y)
         #print " [{:>3}] Achieved {} vs. needed:  {}".format(x, least_frequency, float(work_image.x) * work_image.y / 2 / colors)
         current_error = float(work_image.error_sum) / work_image.x / work_image.y
         print " [{:>3}] Actual error: {:.3f}% (best: {:.3f}, last change: {} ago)".format(x, current_error, best_achieved_error, x - last_change)
