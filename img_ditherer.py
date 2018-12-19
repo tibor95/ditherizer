@@ -74,20 +74,10 @@ class ArrayImage():
         if work_folder == False:
             return "{}_{}.{}".format(self.outfile, color_set.count(), self.outsuffix)
         return "{}/{}_{}_{:>03}.{}".format(self.get_out_folder(), self.outfile, len(self.work_colors), self.work_files_counter, self.outsuffix)
-    #def set_colors_to_use(self, colors):
-    #    self.work_colors = colors
-    #    self.final_colors = copy.deepcopy(self.work_colors)
-    #    #print self.colors
-    #def colors_to_final(self):
-    #    self.final_colors = copy.deepcopy(self.work_colors)
-    #    #print "DEBUG count transfer to final ", id(self.final_colors), self.final_colors[0].count, id(self.work_colors), self.work_colors[0].count
-    #def final_colors_to_work(self):
-    #    self.work_colors = copy.deepcopy(self.final_colors)
-        #print "DEBUG count transfer ",id(self.final_colors), self.final_colors[0].count, id(self.work_colors), self.work_colors[0].count
 
 
-    def dither(self, quiet = False):
-        #self.reset_colors_count()
+    def dither(self, color_set, quiet = False):
+        color_set.reset_colors_count()
 
         for x_tmp in range(self.x):
             if quiet == False and x_tmp % 100 == 0:
@@ -324,6 +314,9 @@ class ColorSet():
 				print " Mutating {}: {}  ->  {}".format(preferred_candidate, rgb, new_rgb)
 			self.colors[preferred_candidate] = ColorValues(new_rgb)
 		#do we have natural candidate?
+	def reset_colors_count(self):
+		for col in self.colors:
+			col.count = 0
 
 class ColorQueue():
 	def __init__(self, size = 5):
@@ -346,7 +339,10 @@ class ColorQueue():
 		if position >= len(self.queue):
 			print "   Position {} > length of queue: {}, returning position 0".format(position, len(self.queue))
 			position = 0
-		return copy.deepcopy(self.queue[position]["colorset"])
+		new_color_set = copy.deepcopy(self.queue[position]["colorset"])
+		#for item in new_color_set.iterate():
+		#	item.count = 0
+		return new_color_set
 	def pretty_print(self):
 		rows_to_print = ["QUEUE:"]
 		for col in self.queue:
@@ -485,7 +481,7 @@ for file_tmp in infiles:
 		#print x, work_image.colors
 		last_change_ago = x - last_change
 		work_image.error_sum = 0
-		work_image.dither(quiet = True)
+		work_image.dither(color_set, quiet = True)
 		least_used = -1
 		least_frequency = 100000
 
