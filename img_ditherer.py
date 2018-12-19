@@ -2,7 +2,7 @@ from scipy import misc
 import numpy
 import argparse
 from itertools import combinations_with_replacement, permutations, product
-from colormath.color_diff import delta_e_cie2000
+#from colormath.color_diff import delta_e_cie2000
 from random import randint, choice, shuffle
 import sys
 import copy
@@ -56,40 +56,13 @@ class ArrayImage():
                 self.data[x_tmp][y_tmp][6] = 0#result
                 self.data[x_tmp][y_tmp][7] = 0
                 self.data[x_tmp][y_tmp][8] = 0
-        #print "image imported to the array"
-
-    def reset_colors_count(self):
-        for col in self.work_colors:
-            col.count = 0
-        #for col in self.final_colors:
-        #    col.count = 0
-    def populate_final_statistics(self):
-        self.final_colors_stat = {}
-        for i, col in enumerate(self.final_colors):
-            self.final_colors_stat[i] = col.count
 
     def populate_work_statistics(self):
         self.work_colors_stat = {}
         for i, col in enumerate(self.work_colors):
             self.work_colors_stat[i] = col.count
         #print "Final colors stat: ", self.final_colors_stat
-    def get_lowest_freq_color(self, comparator, tresh = 0):
-        comp_str = 'most frequent' if comparator == operator.ge else 'least frequent'
-        self.populate_work_statistics()
-        least_pos = None
-        least_freq = None
-        for k,v in self.work_colors_stat.iteritems():
-            if least_freq is None or comparator(v, least_freq):
-                #print "  DEBUG using {}  {}".format(k, v)
-                least_freq = v
-                least_pos = k
-            #else:
-                #print "  DEBUG not using {}  {}".format(k, v)
-        #print "   considering {} on  pos: {}, freq.: {}, tresh: {}".format(comp_str, least_pos, least_freq, tresh)
-        if comparator(least_freq, tresh):
-            #print "  returning {} on pos: {}, freq.: {}, tresh: {}".format(comp_str, least_pos, least_freq, tresh)
-            return least_pos
-        return None
+
     def set_output_filename(self, name):
         if name.endswith('.png') or name.endswith('.jpg'):
             name = name[:-3]
@@ -97,70 +70,24 @@ class ArrayImage():
         self.outsuffix = 'png'
     def get_out_folder(self):
         return "{}_{}".format(self.outfile, len(self.work_colors))
-    def get_output_filename(self, work_folder = False):
+    def get_output_filename(self, color_set, work_folder = False):
         if work_folder == False:
-            return "{}_{}.{}".format(self.outfile, len(self.work_colors), self.outsuffix)
+            return "{}_{}.{}".format(self.outfile, color_set.count(), self.outsuffix)
         return "{}/{}_{}_{:>03}.{}".format(self.get_out_folder(), self.outfile, len(self.work_colors), self.work_files_counter, self.outsuffix)
-    def set_colors_to_use(self, colors):
-        self.work_colors = colors
-        self.final_colors = copy.deepcopy(self.work_colors)
-        #print self.colors
-    def colors_to_final(self):
-        self.final_colors = copy.deepcopy(self.work_colors)
-        #print "DEBUG count transfer to final ", id(self.final_colors), self.final_colors[0].count, id(self.work_colors), self.work_colors[0].count
-    def final_colors_to_work(self):
-        self.work_colors = copy.deepcopy(self.final_colors)
+    #def set_colors_to_use(self, colors):
+    #    self.work_colors = colors
+    #    self.final_colors = copy.deepcopy(self.work_colors)
+    #    #print self.colors
+    #def colors_to_final(self):
+    #    self.final_colors = copy.deepcopy(self.work_colors)
+    #    #print "DEBUG count transfer to final ", id(self.final_colors), self.final_colors[0].count, id(self.work_colors), self.work_colors[0].count
+    #def final_colors_to_work(self):
+    #    self.work_colors = copy.deepcopy(self.final_colors)
         #print "DEBUG count transfer ",id(self.final_colors), self.final_colors[0].count, id(self.work_colors), self.work_colors[0].count
-    def mutate_rgb_tupple(self, old_rgb):
-        new_rgb = list(old_rgb)
-        src = [0,1,2]
-        shuffle(src)
-        #choice([1, 1, 1, 2, 2, 3])
-        channels_to_mutate = src[:choice([1,1,1,2,2,3])]
-        for ch in channels_to_mutate:
-            new_rgb[ch] = choice(cv.get_neighbours(new_rgb[ch]))
-        return tuple(new_rgb)
-
-
-    def mutate(self):
-        print "  Mutation source: {}".format(self.final_colors)
-        self.work_colors = copy.deepcopy(self.final_colors)
-
-        preferred_candidate = self.get_lowest_freq_color(operator.le, tresh=self.x * self.y / len(self.final_colors) / 3)
-        #self.get_lowest_freq_color(operator.ge, tresh=self.x * self.y / len(self.final_colors) / 3)
-
-        if preferred_candidate is None or randint(0,3) == 0:
-            #mutating random color
-            col_to_mutate = randint(0, len(self.final_colors) - 1)
-            #channel_to_mutate = randint(0, 2)
-
-            rgb = self.final_colors[col_to_mutate].get_big_tuple()
-            new_rgb = self.mutate_rgb_tupple(rgb)
-            print " Mutating {}: {}  ->  {}".format(col_to_mutate, rgb, new_rgb)
-            self.work_colors[col_to_mutate] = ColorValues(new_rgb)
-        else:
-            #mutating existing color
-            if randint(0,1) == 0:
-                source_color = self.get_lowest_freq_color(operator.ge)
-                if source_color == preferred_candidate:
-                    print "ERROR: {} == {}".format(str(source_color), str(preferred_candidate))
-                    sys.exit()
-            else:
-                source_color = preferred_candidate
-
-            rgb = self.final_colors[source_color].get_big_tuple()
-            new_rgb = self.mutate_rgb_tupple(rgb)
-            if source_color != preferred_candidate:
-                print " Mutating {} -> {}: {}  ->  {}".format(source_color, preferred_candidate, rgb, new_rgb)
-            else:
-                print " Mutating {}: {}  ->  {}".format(preferred_candidate, rgb, new_rgb)
-            self.work_colors[preferred_candidate] = ColorValues(new_rgb)
-        #do we have natural candidate?
-
 
 
     def dither(self, quiet = False):
-        self.reset_colors_count()
+        #self.reset_colors_count()
 
         for x_tmp in range(self.x):
             if quiet == False and x_tmp % 100 == 0:
@@ -170,7 +97,8 @@ class ArrayImage():
                 #print self.data[x_tmp][y_tmp][3]
                 best_col = self.get_best_color(self.data[x_tmp][y_tmp][0] + self.data[x_tmp][y_tmp][3],
                                                self.data[x_tmp][y_tmp][1] + self.data[x_tmp][y_tmp][4],
-                                                self.data[x_tmp][y_tmp][2] + self.data[x_tmp][y_tmp][5])
+                                                self.data[x_tmp][y_tmp][2] + self.data[x_tmp][y_tmp][5],
+                                                color_set)
                 self.set_new_color(x_tmp, y_tmp, best_col)
                 if posterizeonly == False:
                     self.propagate_errors(x_tmp, y_tmp)
@@ -198,12 +126,6 @@ class ArrayImage():
             [1,0,1],
             [1,1,1],
             [0,1,1]],
-        # 2: [
-        #     [1,0,6],
-        #     [1,1,1],
-        #     [0,1,4],
-        #     [-1,1,3]
-        #],
         }
         total_weight = sum([item[2] for item in propagation_sample[(x+y)%2]])
         for item in propagation_sample[(x+y)%2]:
@@ -216,15 +138,10 @@ class ArrayImage():
         self.data[x][y][3] -= r
         self.data[x][y][4] -= g
         self.data[x][y][5] -= b
-    def get_best_color(self, r,g,b ):
-        #avg = (r + g + b) / 3
-        #r_diff = avg - r
-        #g_diff = avg - g
-        #b_diff = avg - b
+    def get_best_color(self, r,g,b, color_set):
         best_diff = 100000000
         best_col = None
-        #lab_color = LabColor(l,a,b)
-        for col in self.work_colors:
+        for col in color_set.iterate():
             cur_diff = self.get_diff(col.get_small_tuple(), (r,g,b))
             if  cur_diff < best_diff:
                 best_diff = cur_diff
@@ -232,7 +149,6 @@ class ArrayImage():
         best_col.count += 1
         return best_col.r, best_col.g, best_col.b
     def get_diff(self, col1, col2):
-        #print type(col1), type(col2)
         total = pow(col1[0] - col2[0], 2)# * (1+weights[0])
         total += pow(col1[1] - col2[1], 2)# * (1+weights[1])
         total += pow(col1[2] - col2[2], 2)# * (1+weights[2])
@@ -241,12 +157,13 @@ class ArrayImage():
         self.data[x][y][6] = color_tupple[0]
         self.data[x][y][7] = color_tupple[1]
         self.data[x][y][8] = color_tupple[2]
-    def save_new_image(self,work_folder = False, partial = False):
+
+    def save_new_image(self,color_set, work_folder = False, partial = False):
         if work_folder is True and not os.path.exists(work_image.get_out_folder()):
             os.makedirs(work_image.get_out_folder())
         self.new_image = self.image.copy()
 
-        target_destination = self.get_output_filename()
+        target_destination = self.get_output_filename(color_set)
         if work_folder is True:
             target_destination = self.get_output_filename(work_folder = True)
 
@@ -264,7 +181,7 @@ class ArrayImage():
                     self.new_image[x, y, 2] = expand(self.data[x][y][8])
 
         #now exporting color previews
-        for pos, color in enumerate(self.work_colors):
+        for pos, color in enumerate(color_set.iterate()):
             cp = ColorPreview(pos, color, work_image.x)
             for renderdata in cp.render():
                 self.new_image[renderdata[0], renderdata[1], 0] = renderdata[2][0]
@@ -272,6 +189,7 @@ class ArrayImage():
                 self.new_image[renderdata[0], renderdata[1], 2] = renderdata[2][2]
 
         misc.imsave(target_destination, self.new_image)
+
     def clean_errors(self):
         for x in range(0, self.x):
             for y in range(0, self.y):
@@ -349,6 +267,103 @@ class ColorPreview():
                     yield self.starting_x + x, self.starting_y + y,(self.R, self.G, self.B)
 
 
+class ColorSet():
+	def __init__(self, colors):
+		self.colors = colors
+	def __str__(self):
+		return "[{}]".format(", ".join([str(col) for col in self.colors]))
+	def iterate(self):
+		for item in self.colors:
+			yield item
+	def count(self):
+		return len(self.colors)
+	def get_lowest_freq_color(self, comparator, tresh = 0):
+		comp_str = 'most frequent' if comparator == operator.ge else 'least frequent'
+		least_pos = None
+		least_freq = None
+		for k,v in enumerate(self.colors):
+			if least_freq is None or comparator(v.count, least_freq):
+				#print "  DEBUG using {}  {}".format(k, v)
+				least_freq = v.count
+				least_pos = k
+		#print "   considering {} on  pos: {}, freq.: {}, tresh: {}".format(comp_str, least_pos, least_freq, tresh)
+		if comparator(least_freq, tresh):
+			print "  returning {} on pos: {}, freq.: {}, tresh: {}".format(comp_str, least_pos, least_freq, tresh)
+			return least_pos
+		return None
+	def mutate(self, img_size):
+		print "  Mutation source: {}".format(self.colors)
+
+		preferred_candidate = self.get_lowest_freq_color(operator.le, tresh=img_size / len(self.colors) / 3)
+		#self.get_lowest_freq_color(operator.ge, tresh=self.x * self.y / len(self.final_colors) / 3)
+
+		if preferred_candidate is None or randint(0,3) == 0:
+			#mutating random color
+			col_to_mutate = randint(0, len(self.colors) - 1)
+			#channel_to_mutate = randint(0, 2)
+
+			rgb = self.colors[col_to_mutate].get_big_tuple()
+			new_rgb = mutate_rgb_tupple(rgb)
+			print " Mutating {}: {}  ->  {}".format(col_to_mutate, rgb, new_rgb)
+			self.colors[col_to_mutate] = ColorValues(new_rgb)
+		else:
+			#mutating existing color
+			if randint(0,1) == 0:
+				source_color = self.get_lowest_freq_color(operator.ge)
+				if source_color == preferred_candidate:
+					print "ERROR: {} == {}".format(str(source_color), str(preferred_candidate))
+					sys.exit()
+			else:
+				source_color = preferred_candidate
+
+			rgb = self.colors[source_color].get_big_tuple()
+			new_rgb = mutate_rgb_tupple(rgb)
+			if source_color != preferred_candidate:
+				print " Mutating {} -> {}: {}  ->  {}".format(source_color, preferred_candidate, rgb, new_rgb)
+			else:
+				print " Mutating {}: {}  ->  {}".format(preferred_candidate, rgb, new_rgb)
+			self.colors[preferred_candidate] = ColorValues(new_rgb)
+		#do we have natural candidate?
+
+class ColorQueue():
+	def __init__(self, size = 5):
+		self.queue = []
+		self.size = size
+	def add(self, colorset, diff):
+		if not isinstance(diff, float):
+			print "diff must be float"
+			sys.exit()
+		self.queue.append({"diff": diff, "colorset" : copy.deepcopy(colorset)})
+		self.queue = sorted(self.queue, key=lambda k: k['diff'])
+		self.queue = self.queue[:self.size]
+	def __str__(self):
+		return "Queue: {}".format("; ".join(["{:.5f}: {}".format(item["diff"], str(item["colorset"])) for item in self.queue]))
+	def get_best_diff(self):
+		if len(self.queue) == 0:
+			return  1000000
+		return self.queue[0]["diff"]
+	def get(self, position = 0):
+		if position >= len(self.queue):
+			print "   Position {} > length of queue: {}, returning position 0".format(position, len(self.queue))
+			position = 0
+		return copy.deepcopy(self.queue[position]["colorset"])
+	def pretty_print(self):
+		rows_to_print = ["QUEUE:"]
+		for col in self.queue:
+			rows_to_print.append("{:.4f}: {}".format(col["diff"], str(col["colorset"])))
+		for row in rows_to_print:
+			print "  > {}".format(row)
+
+
+def mutate_rgb_tupple(old_rgb):
+	new_rgb = list(old_rgb)
+	src = [0,1,2]
+	shuffle(src)
+	#choice([1, 1, 1, 2, 2, 3])
+	channels_to_mutate = src[:choice([1,1,1,2,2,3])]
+	for ch in channels_to_mutate:
+		new_rgb[ch] = choice(cv.get_neighbours(new_rgb[ch]))
+	return tuple(new_rgb)
 
 
 def get_args():
@@ -426,7 +441,6 @@ def get_random_colors(colors_count):
         if distant_color is not None:
             #print "Appending: {}".format(distant_color)
             random_colors.append(distant_color)
-        #random_colors.append(col)
     print " Generated colors: {}".format(random_colors)
     return random_colors
 
@@ -456,53 +470,58 @@ for file_tmp in infiles:
     work_image = ArrayImage(inimage)
     work_image.set_output_filename(file_tmp.rsplit('.',1)[0])
 
-    work_image.set_colors_to_use(get_random_colors(colors))
+
+    color_queue = ColorQueue()
+    color_set = ColorSet(get_random_colors(colors))
+
 
     print " Clipped amount: {}".format(work_image.error_sum)
 
-    best_achieved_error = 10000000
     last_change = 0
     action = "initial"
     action_results = defaultdict(int)
+    queue_pos = -1
     for x in range(2000):
-        #print x, work_image.colors
-        last_change_ago = x - last_change
-        work_image.error_sum = 0
-        work_image.dither(quiet = True)
-        least_used = -1
-        least_frequency = 100000
+		#print x, work_image.colors
+		last_change_ago = x - last_change
+		work_image.error_sum = 0
+		work_image.dither(quiet = True)
+		least_used = -1
+		least_frequency = 100000
 
-        for i, col in enumerate(work_image.work_colors):
-            if least_frequency > col.count:
-                least_frequency = col.count
-                least_used = i
-            print " {:>2} {:<13} :{:>8}   {:>5.2f}%".format(i, col, col.count, 100 * float(col.count) / work_image.x / work_image.y)
-        #print " [{:>3}] Achieved {} vs. needed:  {}".format(x, least_frequency, float(work_image.x) * work_image.y / 2 / colors)
-        current_error = float(work_image.error_sum) / work_image.x / work_image.y
-        print " [{:>3}] Actual error: {:.3f}% (best: {:.3f}, last change: {} ago)".\
-            format(x, current_error, best_achieved_error, last_change_ago)
-        if current_error < best_achieved_error:
-            best_achieved_error = current_error
-            work_image.save_new_image()
-            if saveworkimages == True:
-                work_image.save_new_image(work_folder = True, partial = partial)
-                work_image.work_files_counter += 1
+		for i, col in enumerate(color_set.iterate()):
+			if least_frequency > col.count:
+				least_frequency = col.count
+				least_used = i
+			print " {:>2} {:<13} :{:>8}   {:>5.2f}%".format(i, col, col.count, 100 * float(col.count) / work_image.x / work_image.y)
+		#print " [{:>3}] Achieved {} vs. needed:  {}".format(x, least_frequency, float(work_image.x) * work_image.y / 2 / colors)
+		current_error = float(work_image.error_sum) / work_image.x / work_image.y
+		print " [{:>3}] Actual error: {:.3f}% (best: {:.3f}, last change: {:>2} ago, queue pos: {})".\
+			format(x, current_error, color_queue.get_best_diff(), last_change_ago, queue_pos)
+		if current_error < color_queue.get_best_diff():
+			work_image.save_new_image(color_set)
+			if saveworkimages == True:
+				work_image.save_new_image(color_set, work_folder = True, partial = partial)
+				work_image.work_files_counter += 1
+			last_change = x
+			action_results[action] += 1
 
-            work_image.colors_to_final()
-            last_change = x
-            action_results[action] += 1
+		#even if the result is not good, we will add it and let queue sorting takes care of it
+		color_queue.add(color_set, current_error)
 
-        else:
-            work_image.final_colors_to_work()
+		color_queue.pretty_print()
 
-        if last_change_ago > idleiterations:
-            print " * processing of {} done ....".format(file_tmp)
-            break
+		if last_change_ago > idleiterations:
+			print " * processing of {} done ....".format(file_tmp)
+			break
 
-        work_image.mutate()
-        action = "mutate"
+		# preparing for next iteration
+		queue_pos = randint(0,3)
+		color_set = color_queue.get(queue_pos)
+		color_set.mutate(work_image.x * work_image.y)
+		action = "mutate"
 
-        work_image.clean_errors()
+		work_image.clean_errors()
 
     print action_results
 
