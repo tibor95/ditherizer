@@ -8,6 +8,7 @@ import sys
 import copy
 import os
 import operator
+from collections import defaultdict
 
 class ChannelValues():
     def __init__(self):
@@ -119,6 +120,8 @@ class ArrayImage():
         for ch in channels_to_mutate:
             new_rgb[ch] = choice(cv.get_neighbours(new_rgb[ch]))
         return tuple(new_rgb)
+
+
     def mutate(self):
         print "  Mutation source: {}".format(self.final_colors)
         self.work_colors = copy.deepcopy(self.final_colors)
@@ -249,7 +252,7 @@ class ArrayImage():
 
         for x in range(0, self.x):
             if x % 200 == 0:
-                print " @ exporting {} : {}".format(target_destination, x)
+                print " @ exporting {} : {}/{}".format(target_destination, x, self.x)
             for y in range(0, self.y):
                 if partial == True and (y < self.y / 10 or y > self.y * 9 / 10):
                     self.new_image[x, y, 0] = expand(self.data[x][y][0])
@@ -287,13 +290,7 @@ class ColorValues():
             self.R = values[0]
             self.G = values[1]
             self.B = values[2]
-            self.r = shrink(self.R)
-            self.g = shrink(self.G)
-            self.b = shrink(self.B)
-            self.avg = (self.r + self.g + self.b) / 3
-            self.r_diff = self.r - self.avg
-            self.g_diff = self.g - self.avg
-            self.b_diff = self.b - self.avg
+            self.recalculate_from_big()
         else:
             self.r = values[0]
             self.g = values[1]
@@ -306,6 +303,19 @@ class ColorValues():
             self.G = expand(self.g)
             self.B = expand(self.b)
         self.count = 0
+    def recalculate_from_big(self):
+        self.r = shrink(self.R)
+        self.g = shrink(self.G)
+        self.b = shrink(self.B)
+        self.avg = (self.r + self.g + self.b) / 3
+        self.r_diff = self.r - self.avg
+        self.g_diff = self.g - self.avg
+        self.b_diff = self.b - self.avg
+    def copy(self):
+        return type(self)(self.R, self.G, self.B)
+    def reset_channel(self, channel, value):
+        setattr(self, channel, value)
+        self.recalculate_from_big()
     def get_small_tuple(self):
         return (self.r, self.g, self.b)
 
@@ -354,7 +364,7 @@ def get_args():
     parser.add_argument(
         '-p', '--percentage', type=int, default = 100)
     parser.add_argument(
-        '-i', '--idleiterations', type=int, default = 100)
+        '-i', '--idleiterations', type=int, default = 75)
     parser.add_argument(
         '-o', '--outfile', type=str, default="output")
     parser.add_argument(
@@ -452,8 +462,11 @@ for file_tmp in infiles:
 
     best_achieved_error = 10000000
     last_change = 0
+    action = "initial"
+    action_results = defaultdict(int)
     for x in range(2000):
         #print x, work_image.colors
+        last_change_ago = x - last_change
         work_image.error_sum = 0
         work_image.dither(quiet = True)
         least_used = -1
@@ -466,7 +479,8 @@ for file_tmp in infiles:
             print " {:>2} {:<13} :{:>8}   {:>5.2f}%".format(i, col, col.count, 100 * float(col.count) / work_image.x / work_image.y)
         #print " [{:>3}] Achieved {} vs. needed:  {}".format(x, least_frequency, float(work_image.x) * work_image.y / 2 / colors)
         current_error = float(work_image.error_sum) / work_image.x / work_image.y
-        print " [{:>3}] Actual error: {:.3f}% (best: {:.3f}, last change: {} ago)".format(x, current_error, best_achieved_error, x - last_change)
+        print " [{:>3}] Actual error: {:.3f}% (best: {:.3f}, last change: {} ago)".\
+            format(x, current_error, best_achieved_error, last_change_ago)
         if current_error < best_achieved_error:
             best_achieved_error = current_error
             work_image.save_new_image()
@@ -476,14 +490,21 @@ for file_tmp in infiles:
 
             work_image.colors_to_final()
             last_change = x
+            action_results[action] += 1
 
         else:
             work_image.final_colors_to_work()
 
-        work_image.mutate()
-        work_image.clean_errors()
-
-        if last_change + idleiterations < x:
+        if last_change_ago > idleiterations:
             print " * processing of {} done ....".format(file_tmp)
             break
+
+        work_image.mutate()
+        action = "mutate"
+
+        work_image.clean_errors()
+
+    print action_results
+
+
 
