@@ -9,6 +9,7 @@ import copy
 import os
 import operator
 from collections import defaultdict
+from multiprocessing import Process, Lock
 
 class ChannelValues():
 	def __init__(self):
@@ -277,10 +278,8 @@ class ColorSet():
 		least_freq = None
 		for k,v in enumerate(self.colors):
 			if least_freq is None or comparator(v.count, least_freq):
-				#print "  DEBUG using {}  {}".format(k, v)
 				least_freq = v.count
 				least_pos = k
-		#print "   considering {} on  pos: {}, freq.: {}, tresh: {}".format(comp_str, least_pos, least_freq, tresh)
 		if comparator(least_freq, tresh):
 			print "  returning {} on pos: {}, freq.: {}, tresh: {}".format(comp_str, least_pos, least_freq, tresh)
 			return least_pos
@@ -340,17 +339,19 @@ class ColorSet():
 			col.count = 0
 
 class ColorQueue():
-	def __init__(self, color_set_colors_count, size = 5):
+	def __init__(self, color_set_colors_count, lock, size = 5):
 		self.queue = []
 		self.size = size
 		self.color_set_colors_count = color_set_colors_count
+		self.lock = lock
 	def add(self, colorset, diff):
 		if not isinstance(diff, float):
 			print "diff must be float"
 			sys.exit()
-		self.queue.append({"diff": diff, "colorset" : copy.deepcopy(colorset)})
-		self.queue = sorted(self.queue, key=lambda k: k['diff'])
-		self.queue = self.queue[:self.size]
+		with self.lock:
+			self.queue.append({"diff": diff, "colorset" : copy.deepcopy(colorset)})
+			self.queue = sorted(self.queue, key=lambda k: k['diff'])
+			self.queue = self.queue[:self.size]
 	def __str__(self):
 		return "Queue: {}".format("; ".join(["{:.5f}: {}".format(item["diff"], str(item["colorset"])) for item in self.queue]))
 	def get_best_diff(self):
@@ -369,11 +370,12 @@ class ColorQueue():
 		#	item.count = 0
 		return new_color_set
 	def pretty_print(self):
-		rows_to_print = ["QUEUE:"]
-		for col in self.queue:
-			rows_to_print.append("{:.4f}: {}".format(col["diff"], str(col["colorset"])))
-		for row in rows_to_print:
-			print "  > {}".format(row)
+		with self.lock:
+			rows_to_print = ["QUEUE:"]
+			for col in self.queue:
+				rows_to_print.append("{:.4f}: {}".format(col["diff"], str(col["colorset"])))
+			for row in rows_to_print:
+				print "  > {}".format(row)
 
 
 
@@ -457,7 +459,7 @@ def get_random_colors(colors_count):
 	print " Generated colors: {}".format(random_colors)
 	return random_colors
 
-def run(color_queue, work_image, last_change, x):
+def run(color_queue, work_image, last_change, x, save_lock):
 	# Takes:
 	# copy of workimage
 	# copy of colorset
@@ -487,15 +489,13 @@ def run(color_queue, work_image, last_change, x):
 	current_error = float(work_image.error_sum) / work_image.x / work_image.y
 	print " [{:>3}] Actual error: {:.3f}% (best: {:.3f}, last change: {:>2} ago, queue pos: {})".\
 		format(x, current_error, color_queue.get_best_diff(), x - last_change, queue_pos)
-	if current_error < color_queue.get_best_diff():
-		work_image.save_new_image(color_set, partial = partial)
-		if saveworkimages == True:
-			work_image.save_new_image(color_set, work_folder = True, partial = partial)
-			work_image.work_files_counter += 1
-		last_change = x
-		#action_results[action] += 1
-
-
+	with save_lock:
+		if current_error < color_queue.get_best_diff():
+			work_image.save_new_image(color_set, partial = partial)
+			if saveworkimages == True:
+				work_image.save_new_image(color_set, work_folder = True, partial = partial)
+				work_image.work_files_counter += 1
+			last_change = x
 
 	#even if the result is not good, we will add it and let queue sorting takes care of it
 	color_queue.add(color_set, current_error)
@@ -509,7 +509,7 @@ if __name__ == "__main__":
 
 	percentage, colors, outfile, infiles, posterizeonly, idleiterations, saveworkimages, partial = get_args()
 
-	print "Posterizing only: ", posterizeonly
+	#print "Posterizing only: ", posterizeonly
 
 	max_error = 0.5
 
@@ -520,6 +520,7 @@ if __name__ == "__main__":
 		sys.exit()
 
 	cv = ChannelValues()
+	save_lock = Lock()
 
 	for file_tmp in infiles:
 
@@ -534,7 +535,7 @@ if __name__ == "__main__":
 		work_image.set_output_filename(file_tmp.rsplit('.',1)[0])
 
 
-		color_queue = ColorQueue(colors)
+		color_queue = ColorQueue(colors, Lock())
 		#color_set = ColorSet(get_random_colors(colors))
 
 
@@ -547,7 +548,7 @@ if __name__ == "__main__":
 		for x in range(2000):
 
 
-			current_error, color_set, last_change = run(color_queue, work_image, last_change, x)
+			current_error, color_set, last_change = run(color_queue, work_image, last_change, x, save_lock)
 
 
 			if x - last_change > idleiterations:
