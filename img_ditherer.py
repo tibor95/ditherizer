@@ -10,6 +10,7 @@ import os
 import operator
 from collections import defaultdict
 from multiprocessing import Process, Lock, Queue
+import traceback
 
 class ChannelValues():
 	def __init__(self):
@@ -92,13 +93,14 @@ class ArrayImage():
 												self.data[x_tmp][y_tmp][2] + self.data[x_tmp][y_tmp][5],
 												color_set)
 				self.set_new_color(x_tmp, y_tmp, best_col)
-				if posterizeonly == False:
-					self.propagate_errors(x_tmp, y_tmp)
+				#if posterizeonly == False:
+				self.propagate_errors(x_tmp, y_tmp)
 		#print "dithering is over"
 
 	def clip(self, x,y):
 		for pos in [3,4,5]:
 			#print self.data[x][y][pos]
+			max_error = 1
 			self.error_sum += abs(self.data[x][y][pos])
 			if self.data[x][y][pos] > 1 + max_error:
 				self.data[x][y][pos] = 1 + max_error
@@ -135,17 +137,13 @@ class ArrayImage():
 		best_diff = 100000000
 		best_col = None
 		for col in color_set.iterate():
-			cur_diff = self.get_diff(col.get_small_tuple(), (r,g,b))
+			cur_diff = get_diff(col.get_small_tuple(), (r,g,b))
 			if  cur_diff < best_diff:
 				best_diff = cur_diff
 				best_col = col
 		best_col.count += 1
 		return best_col.r, best_col.g, best_col.b
-	def get_diff(self, col1, col2):
-		total = pow(col1[0] - col2[0], 2)# * (1+weights[0])
-		total += pow(col1[1] - col2[1], 2)# * (1+weights[1])
-		total += pow(col1[2] - col2[2], 2)# * (1+weights[2])
-		return total
+
 	def set_new_color(self, x, y  , color_tupple):
 		self.data[x][y][6] = color_tupple[0]
 		self.data[x][y][7] = color_tupple[1]
@@ -175,7 +173,7 @@ class ArrayImage():
 
 		#now exporting color previews
 		for pos, color in enumerate(color_set.iterate()):
-			cp = ColorPreview(pos, color, work_image.x)
+			cp = ColorPreview(pos, color, self.x)
 			for renderdata in cp.render():
 				self.new_image[renderdata[0], renderdata[1], 0] = renderdata[2][0]
 				self.new_image[renderdata[0], renderdata[1], 1] = renderdata[2][1]
@@ -189,6 +187,12 @@ class ArrayImage():
 				self.data[x, y, 3] = 0
 				self.data[x, y, 4] = 0
 				self.data[x, y, 5] = 0
+
+def get_diff(col1, col2):
+	total = pow(col1[0] - col2[0], 2)# * (1+weights[0])
+	total += pow(col1[1] - col2[1], 2)# * (1+weights[1])
+	total += pow(col1[2] - col2[2], 2)# * (1+weights[2])
+	return total
 
 def shrink(value):
 	return pow(value/255.0, 1/2.2)
@@ -263,8 +267,9 @@ class ColorPreview():
 
 
 class ColorSet():
-	def __init__(self, colors):
+	def __init__(self, colors, cv):
 		self.colors = colors
+		self.cv = cv
 	def __str__(self):
 		return "[{}]".format(", ".join([str(col) for col in self.colors]))
 	def iterate(self):
@@ -330,7 +335,7 @@ class ColorSet():
 		for x in range(20):
 			for ch in channels_to_mutate:
 				new_rgb = list(old_rgb)
-				new_rgb[ch] = choice(cv.get_neighbours(new_rgb[ch]))
+				new_rgb[ch] = choice(self.cv.get_neighbours(new_rgb[ch]))
 				if not self.color_exists(new_rgb):
 					return tuple(new_rgb)
 
@@ -339,11 +344,12 @@ class ColorSet():
 			col.count = 0
 
 class ColorQueue():
-	def __init__(self, color_set_colors_count, lock, size = 5):
+	def __init__(self, color_set_colors_count, lock, cv, size = 5):
 		self.queue = []
 		self.size = size
 		self.color_set_colors_count = color_set_colors_count
 		self.lock = lock
+		self.cv = cv
 	def add(self, colorset, diff):
 		if not isinstance(diff, float):
 			print "diff must be float"
@@ -361,7 +367,7 @@ class ColorQueue():
 	def get(self, position = 0):
 		if len(self.queue) == 0:
 			print "Color_queue is still empty, generating random colors"
-			return ColorSet(get_random_colors(self.color_set_colors_count))
+			return ColorSet(self.get_random_colors(self.color_set_colors_count), self.cv)
 		if position >= len(self.queue):
 			print "   Position {} > length of queue: {}, returning position 0".format(position, len(self.queue))
 			position = 0
@@ -376,9 +382,34 @@ class ColorQueue():
 				rows_to_print.append("{:.4f}: {}".format(col["diff"], str(col["colorset"])))
 			for row in rows_to_print:
 				print "  > {}".format(row)
+	def get_random_colors(self, colors_count):
+		#print "genrating {} colors".format(colors_count)
+		random_colors = []
+		for x in range(colors_count):
+			best_dist = -1
+			distant_color = None
+			for y in range(10):
+				col = self.get_random_color(random_colors)
+				#print "considering color: {}".format(col)
+				dist = get_nearest_distance(col, random_colors)
+				if dist > best_dist:
+					best_dist = dist
+					distant_color = col
+			if distant_color is not None:
+				random_colors.append(distant_color)
+		print " Generated colors: {}".format(random_colors)
+		return random_colors
 
+	def get_random_single_color(self):
+		return self.cv.get_random()
+		#return choice([0, 0, 10, 25, 60, 140, 190, 255, 255])
 
-
+	def get_random_color(self, current_colors = None):
+		for x in range(100):
+			col_tmp = ColorValues([self.get_random_single_color(), self.get_random_single_color(), self.get_random_single_color()])
+			if current_colors is None or col_tmp not in current_colors:
+				return col_tmp
+		raise ValueError("failed to generate color")
 
 
 def get_args():
@@ -405,7 +436,7 @@ def get_args():
 		'-A', '--partial', action = "store_true", default = False)
 	parser.add_argument(
 		'-f', '--infile', required = True, type=str, nargs='+')
-	parser.add_argument("-P", "--posterizeonly", action = "store_true", default = False)
+	#parser.add_argument("-P", "--posterizeonly", action = "store_true", default = False)
 
 
 	args = parser.parse_args()
@@ -414,55 +445,26 @@ def get_args():
 	outfile = args.outfile
 	infile = args.infile
 	idleiterations = args.idleiterations
-	posterizeonly = args.posterizeonly
+	#posterizeonly = args.posterizeonly
 	saveworkimages = args.saveworkimages
 	partial = args.partial
 	threads = args.threads
 
-	return percentage, colors, outfile, infile, posterizeonly, idleiterations, saveworkimages, partial, threads
+	return percentage, colors, outfile, infile, idleiterations, saveworkimages, partial, threads
 
 def get_nearest_distance(col1, colors):
 	best_diff = 0
 	for col in colors:
-		diff = work_image.get_diff(col1.get_small_tuple(), col.get_small_tuple())
+		diff = get_diff(col1.get_small_tuple(), col.get_small_tuple())
 		if diff > best_diff:
 			best_diff = diff
 	return best_diff
 
-def get_random_single_color():
-	return cv.get_random()
-	#return choice([0, 0, 10, 25, 60, 140, 190, 255, 255])
 
-def get_random_color(current_colors = None):
-	for x in range(100):
-		col_tmp = ColorValues([get_random_single_color(), get_random_single_color(), get_random_single_color()])
-		if current_colors is None or col_tmp not in current_colors:
-			return col_tmp
-	raise ValueError("failed to generate color")
 
-def get_random_colors(colors_count):
-	#print "genrating {} colors".format(colors_count)
-	random_colors = []
-	for x in range(colors_count):
-		best_dist = -1
-		distant_color = None
-		#col = get_random_color()
-		for y in range(10):
-			col = get_random_color(random_colors)
-			#print "considering color: {}".format(col)
-			dist = get_nearest_distance(col, random_colors)
-			# print dist
-			if dist > best_dist:
-				best_dist = dist
-				distant_color = col
-				 # print "better: {}".format(best_dist)
-		if distant_color is not None:
-			#print "Appending: {}".format(distant_color)
-			random_colors.append(distant_color)
-	print " Generated colors: {}".format(random_colors)
-	return random_colors
 
-def run(color_queue, work_image, last_change, x, save_lock, thread_id, q):
+
+def run(color_queue, work_image, last_change, x, save_lock, thread_id, q, cv, partial, saveworkimages):
 	# Takes:
 	# copy of workimage
 	# copy of colorset
@@ -470,48 +472,51 @@ def run(color_queue, work_image, last_change, x, save_lock, thread_id, q):
 	# modified colorset
 	# modified workimage
 
-	print " * {:>3}/{}".format(x, thread_id)
-	# preparing for iteration
-	queue_pos = randint(0,3)
-	color_set = color_queue.get(queue_pos)
-	if x > 0: # no mutation on first iteration
-		color_set.mutate(work_image.x * work_image.y)
-	action = "mutate"
+	try:
+		with save_lock:
+			print " * {:>3}/{}".format(x, thread_id)
+		# preparing for iteration
+		queue_pos = randint(0,3)
+		color_set = color_queue.get(queue_pos)
+		if x > 0: # no mutation on first iteration
+			color_set.mutate(work_image.x * work_image.y)
+		action = "mutate"
 
-	work_image.error_sum = 0
-	work_image.clean_errors()
-	work_image.dither(color_set, quiet = True)
-	least_used = -1
-	least_frequency = 100000
-	changed = False
+		work_image.error_sum = 0
+		work_image.clean_errors()
+		work_image.dither(color_set, quiet = True)
+		#least_used = -1
+		least_frequency = 100000
+		changed = False
 
-	with save_lock:
-		for i, col in enumerate(color_set.iterate()):
-			if least_frequency > col.count:
-				least_frequency = col.count
-				least_used = i
-			print "  TH:{} {:>2} {:<13} :{:>8}   {:>5.2f}%".format(thread_id, i, col, col.count, 100 * float(col.count) / work_image.x / work_image.y)
-		#print " [{:>3}] Achieved {} vs. needed:  {}".format(x, least_frequency, float(work_image.x) * work_image.y / 2 / colors)
-		current_error = float(work_image.error_sum) / work_image.x / work_image.y
-		print "  TH:{} Actual error: {:.3f}% (best: {:.3f}, last change: {:>2} ago, queue pos: {})".\
-			format(thread_id, current_error, color_queue.get_best_diff(), x - last_change, queue_pos)
-		if current_error < color_queue.get_best_diff():
-			work_image.save_new_image(color_set, partial = partial)
-			if saveworkimages == True:
-				work_image.save_new_image(color_set, work_folder = True, partial = partial)
-				work_image.work_files_counter += 1
-			changed = True
+		with save_lock:
+			for i, col in enumerate(color_set.iterate()):
+				if least_frequency > col.count:
+					least_frequency = col.count
+					least_used = i
+				print "  TH:{} {:>2} {:<13} :{:>8}   {:>5.2f}%".format(thread_id, i, col, col.count, 100 * float(col.count) / work_image.x / work_image.y)
+			#print " [{:>3}] Achieved {} vs. needed:  {}".format(x, least_frequency, float(work_image.x) * work_image.y / 2 / colors)
+			current_error = float(work_image.error_sum) / work_image.x / work_image.y
+			print "  TH:{} Actual error: {:.3f}% (best: {:.3f}, last change: {:>2} ago, queue pos: {})".\
+				format(thread_id, current_error, color_queue.get_best_diff(), x - last_change, queue_pos)
+			if current_error < color_queue.get_best_diff():
+				work_image.save_new_image(color_set, partial = partial)
+				if saveworkimages == True:
+					work_image.save_new_image(color_set, work_folder = True, partial = partial)
+					work_image.work_files_counter += 1
+				changed = True
 
-	#even if the result is not good, we will add it and let queue sorting takes care of it
-
-
-	q.put((color_set, current_error, changed))
+		q.put((color_set, current_error, changed))
+	except Exception as e:
+		print "Run() failed with: ",str(e)
+		traceback.print_exc()
+		q.put(e)
 
 
 
 if __name__ == "__main__":
 
-	percentage, colors, outfile, infiles, posterizeonly, idleiterations, saveworkimages, partial, threads = get_args()
+	percentage, colors, outfile, infiles, idleiterations, saveworkimages, partial, threads = get_args()
 
 	#print "Posterizing only: ", posterizeonly
 
@@ -539,7 +544,7 @@ if __name__ == "__main__":
 		work_image = ArrayImage(inimage)
 		work_image.set_output_filename(file_tmp.rsplit('.',1)[0])
 
-		color_queue = ColorQueue(colors, Lock())
+		color_queue = ColorQueue(colors, Lock(), cv)
 
 		#print " Clipped amount: {}".format(work_image.error_sum)
 
@@ -551,11 +556,17 @@ if __name__ == "__main__":
 
 		for x in range(2000):
 
-			procs = [Process(target=run, args=(color_queue, copy.deepcopy(work_image), last_change, x, save_lock, i, q)) for i in range(2)]
+			procs = [Process(target=run, args=(color_queue, copy.deepcopy(work_image), last_change, x,
+											   save_lock, i, q, cv, partial, saveworkimages,)) for i in range(threads)]
 			for p in procs:
 				p.start()
 			for p in procs:
-				color_set, current_error, changed = q.get()
+				result = q.get()
+				if isinstance(result, Exception):
+					with save_lock:
+						print "Got exception, quitting...."
+					sys.exit()
+				color_set, current_error, changed = result
 				#print "From queue: ", color_set, current_error
 				p.join()
 				with save_lock:
@@ -563,10 +574,6 @@ if __name__ == "__main__":
 					if changed == True:
 						last_change = x
 			color_queue.pretty_print()
-
-			#color_queue.add(color_set, current_error)
-			#color_queue.pretty_print()
-			#current_error, color_set, last_change = run(color_queue, work_image, last_change, x, save_lock)
 
 			if x - last_change > idleiterations / threads:
 				print " * processing of {} done ....".format(file_tmp)
