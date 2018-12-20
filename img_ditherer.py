@@ -9,7 +9,7 @@ import copy
 import os
 import operator
 from collections import defaultdict
-from multiprocessing import Process, Lock
+from multiprocessing import Process, Lock, Queue
 
 class ChannelValues():
 	def __init__(self):
@@ -392,6 +392,8 @@ def get_args():
 	parser.add_argument(
 		'-c', '--colors', type=int, default = 5)
 	parser.add_argument(
+		'-t', '--threads', type=int, default = 2)
+	parser.add_argument(
 		'-p', '--percentage', type=int, default = 100)
 	parser.add_argument(
 		'-i', '--idleiterations', type=int, default = 75)
@@ -415,8 +417,9 @@ def get_args():
 	posterizeonly = args.posterizeonly
 	saveworkimages = args.saveworkimages
 	partial = args.partial
+	threads = args.threads
 
-	return percentage, colors, outfile, infile, posterizeonly, idleiterations, saveworkimages, partial
+	return percentage, colors, outfile, infile, posterizeonly, idleiterations, saveworkimages, partial, threads
 
 def get_nearest_distance(col1, colors):
 	best_diff = 0
@@ -459,7 +462,7 @@ def get_random_colors(colors_count):
 	print " Generated colors: {}".format(random_colors)
 	return random_colors
 
-def run(color_queue, work_image, last_change, x, save_lock):
+def run(color_queue, work_image, last_change, x, save_lock, thread_id, q):
 	# Takes:
 	# copy of workimage
 	# copy of colorset
@@ -467,6 +470,7 @@ def run(color_queue, work_image, last_change, x, save_lock):
 	# modified colorset
 	# modified workimage
 
+	print " * {:>3}/{}".format(x, thread_id)
 	# preparing for iteration
 	queue_pos = randint(0,3)
 	color_set = color_queue.get(queue_pos)
@@ -479,35 +483,35 @@ def run(color_queue, work_image, last_change, x, save_lock):
 	work_image.dither(color_set, quiet = True)
 	least_used = -1
 	least_frequency = 100000
+	changed = False
 
-	for i, col in enumerate(color_set.iterate()):
-		if least_frequency > col.count:
-			least_frequency = col.count
-			least_used = i
-		print " {:>2} {:<13} :{:>8}   {:>5.2f}%".format(i, col, col.count, 100 * float(col.count) / work_image.x / work_image.y)
-	#print " [{:>3}] Achieved {} vs. needed:  {}".format(x, least_frequency, float(work_image.x) * work_image.y / 2 / colors)
-	current_error = float(work_image.error_sum) / work_image.x / work_image.y
-	print " [{:>3}] Actual error: {:.3f}% (best: {:.3f}, last change: {:>2} ago, queue pos: {})".\
-		format(x, current_error, color_queue.get_best_diff(), x - last_change, queue_pos)
 	with save_lock:
+		for i, col in enumerate(color_set.iterate()):
+			if least_frequency > col.count:
+				least_frequency = col.count
+				least_used = i
+			print "  TH:{} {:>2} {:<13} :{:>8}   {:>5.2f}%".format(thread_id, i, col, col.count, 100 * float(col.count) / work_image.x / work_image.y)
+		#print " [{:>3}] Achieved {} vs. needed:  {}".format(x, least_frequency, float(work_image.x) * work_image.y / 2 / colors)
+		current_error = float(work_image.error_sum) / work_image.x / work_image.y
+		print "  TH:{} Actual error: {:.3f}% (best: {:.3f}, last change: {:>2} ago, queue pos: {})".\
+			format(thread_id, current_error, color_queue.get_best_diff(), x - last_change, queue_pos)
 		if current_error < color_queue.get_best_diff():
 			work_image.save_new_image(color_set, partial = partial)
 			if saveworkimages == True:
 				work_image.save_new_image(color_set, work_folder = True, partial = partial)
 				work_image.work_files_counter += 1
-			last_change = x
+			changed = True
 
 	#even if the result is not good, we will add it and let queue sorting takes care of it
-	color_queue.add(color_set, current_error)
-	color_queue.pretty_print()
 
-	return current_error, color_set, last_change
+
+	q.put((color_set, current_error, changed))
 
 
 
 if __name__ == "__main__":
 
-	percentage, colors, outfile, infiles, posterizeonly, idleiterations, saveworkimages, partial = get_args()
+	percentage, colors, outfile, infiles, posterizeonly, idleiterations, saveworkimages, partial, threads = get_args()
 
 	#print "Posterizing only: ", posterizeonly
 
@@ -521,6 +525,7 @@ if __name__ == "__main__":
 
 	cv = ChannelValues()
 	save_lock = Lock()
+	q = Queue()
 
 	for file_tmp in infiles:
 
@@ -534,28 +539,38 @@ if __name__ == "__main__":
 		work_image = ArrayImage(inimage)
 		work_image.set_output_filename(file_tmp.rsplit('.',1)[0])
 
-
 		color_queue = ColorQueue(colors, Lock())
-		#color_set = ColorSet(get_random_colors(colors))
 
-
-		print " Clipped amount: {}".format(work_image.error_sum)
+		#print " Clipped amount: {}".format(work_image.error_sum)
 
 		last_change = 0
 		action = "initial"
 		action_results = defaultdict(int)
 		queue_pos = -1
+
+
 		for x in range(2000):
 
+			procs = [Process(target=run, args=(color_queue, copy.deepcopy(work_image), last_change, x, save_lock, i, q)) for i in range(2)]
+			for p in procs:
+				p.start()
+			for p in procs:
+				color_set, current_error, changed = q.get()
+				#print "From queue: ", color_set, current_error
+				p.join()
+				with save_lock:
+					color_queue.add(color_set, current_error)
+					if changed == True:
+						last_change = x
+			color_queue.pretty_print()
 
-			current_error, color_set, last_change = run(color_queue, work_image, last_change, x, save_lock)
+			#color_queue.add(color_set, current_error)
+			#color_queue.pretty_print()
+			#current_error, color_set, last_change = run(color_queue, work_image, last_change, x, save_lock)
 
-
-			if x - last_change > idleiterations:
+			if x - last_change > idleiterations / threads:
 				print " * processing of {} done ....".format(file_tmp)
 				break
-
-
 
 
 		print action_results
