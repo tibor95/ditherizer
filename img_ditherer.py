@@ -68,13 +68,14 @@ class ArrayImage():
 			name = name[:-3]
 		self.outfile = name
 		self.outsuffix = 'png'
+
 	def get_out_folder(self):
 		return "{}_{}".format(self.outfile, len(self.work_colors))
+
 	def get_output_filename(self, color_set, work_folder = False):
 		if work_folder == False:
 			return "{}_{}.{}".format(self.outfile, color_set.count(), self.outsuffix)
 		return "{}/{}_{}_{:>03}.{}".format(self.get_out_folder(), self.outfile, len(self.work_colors), self.work_files_counter, self.outsuffix)
-
 
 	def dither(self, color_set, quiet = False):
 		color_set.reset_colors_count()
@@ -93,6 +94,7 @@ class ArrayImage():
 				if posterizeonly == False:
 					self.propagate_errors(x_tmp, y_tmp)
 		#print "dithering is over"
+
 	def clip(self, x,y):
 		for pos in [3,4,5]:
 			#print self.data[x][y][pos]
@@ -338,9 +340,10 @@ class ColorSet():
 			col.count = 0
 
 class ColorQueue():
-	def __init__(self, size = 5):
+	def __init__(self, color_set_colors_count, size = 5):
 		self.queue = []
 		self.size = size
+		self.color_set_colors_count = color_set_colors_count
 	def add(self, colorset, diff):
 		if not isinstance(diff, float):
 			print "diff must be float"
@@ -355,6 +358,9 @@ class ColorQueue():
 			return  1000000
 		return self.queue[0]["diff"]
 	def get(self, position = 0):
+		if len(self.queue) == 0:
+			print "Color_queue is still empty, generating random colors"
+			return ColorSet(get_random_colors(self.color_set_colors_count))
 		if position >= len(self.queue):
 			print "   Position {} > length of queue: {}, returning position 0".format(position, len(self.queue))
 			position = 0
@@ -451,86 +457,107 @@ def get_random_colors(colors_count):
 	print " Generated colors: {}".format(random_colors)
 	return random_colors
 
-percentage, colors, outfile, infiles, posterizeonly, idleiterations, saveworkimages, partial = get_args()
+def run(color_queue, work_image, last_change, x):
+	# Takes:
+	# copy of workimage
+	# copy of colorset
+	# returns:
+	# modified colorset
+	# modified workimage
 
-print "Posterizing only: ", posterizeonly
-
-max_error = 0.5
-
-#test
-test_v = randint (10,250)
-print " {} -> {} -> {}".format(test_v, shrink(test_v), expand(shrink(test_v)))
-if not test_v == expand(shrink(test_v)):
-	sys.exit()
-
-cv = ChannelValues()
-
-for file_tmp in infiles:
-
-	print "Doing: {}".format(file_tmp)
-
-	inimage = misc.imread(file_tmp)
-	if percentage != 100:
-		inimage = misc.imresize(inimage, percentage)
-		print " ... resizing to {}%, new dimensions: {}x{}".format(percentage, inimage.shape[0], inimage.shape[1])
-
-	work_image = ArrayImage(inimage)
-	work_image.set_output_filename(file_tmp.rsplit('.',1)[0])
-
-
-	color_queue = ColorQueue()
-	color_set = ColorSet(get_random_colors(colors))
-
-
-	print " Clipped amount: {}".format(work_image.error_sum)
-
-	last_change = 0
-	action = "initial"
-	action_results = defaultdict(int)
-	queue_pos = -1
-	for x in range(2000):
-		#print x, work_image.colors
-		last_change_ago = x - last_change
-		work_image.error_sum = 0
-		work_image.dither(color_set, quiet = True)
-		least_used = -1
-		least_frequency = 100000
-
-		for i, col in enumerate(color_set.iterate()):
-			if least_frequency > col.count:
-				least_frequency = col.count
-				least_used = i
-			print " {:>2} {:<13} :{:>8}   {:>5.2f}%".format(i, col, col.count, 100 * float(col.count) / work_image.x / work_image.y)
-		#print " [{:>3}] Achieved {} vs. needed:  {}".format(x, least_frequency, float(work_image.x) * work_image.y / 2 / colors)
-		current_error = float(work_image.error_sum) / work_image.x / work_image.y
-		print " [{:>3}] Actual error: {:.3f}% (best: {:.3f}, last change: {:>2} ago, queue pos: {})".\
-			format(x, current_error, color_queue.get_best_diff(), last_change_ago, queue_pos)
-		if current_error < color_queue.get_best_diff():
-			work_image.save_new_image(color_set, partial = partial)
-			if saveworkimages == True:
-				work_image.save_new_image(color_set, work_folder = True, partial = partial)
-				work_image.work_files_counter += 1
-			last_change = x
-			action_results[action] += 1
-
-		#even if the result is not good, we will add it and let queue sorting takes care of it
-		color_queue.add(color_set, current_error)
-
-		color_queue.pretty_print()
-
-		if last_change_ago > idleiterations:
-			print " * processing of {} done ....".format(file_tmp)
-			break
-
-		# preparing for next iteration
-		queue_pos = randint(0,3)
-		color_set = color_queue.get(queue_pos)
+	# preparing for iteration
+	queue_pos = randint(0,3)
+	color_set = color_queue.get(queue_pos)
+	if x > 0: # no mutation on first iteration
 		color_set.mutate(work_image.x * work_image.y)
-		action = "mutate"
+	action = "mutate"
 
-		work_image.clean_errors()
+	work_image.error_sum = 0
+	work_image.clean_errors()
+	work_image.dither(color_set, quiet = True)
+	least_used = -1
+	least_frequency = 100000
 
-	print action_results
+	for i, col in enumerate(color_set.iterate()):
+		if least_frequency > col.count:
+			least_frequency = col.count
+			least_used = i
+		print " {:>2} {:<13} :{:>8}   {:>5.2f}%".format(i, col, col.count, 100 * float(col.count) / work_image.x / work_image.y)
+	#print " [{:>3}] Achieved {} vs. needed:  {}".format(x, least_frequency, float(work_image.x) * work_image.y / 2 / colors)
+	current_error = float(work_image.error_sum) / work_image.x / work_image.y
+	print " [{:>3}] Actual error: {:.3f}% (best: {:.3f}, last change: {:>2} ago, queue pos: {})".\
+		format(x, current_error, color_queue.get_best_diff(), x - last_change, queue_pos)
+	if current_error < color_queue.get_best_diff():
+		work_image.save_new_image(color_set, partial = partial)
+		if saveworkimages == True:
+			work_image.save_new_image(color_set, work_folder = True, partial = partial)
+			work_image.work_files_counter += 1
+		last_change = x
+		#action_results[action] += 1
+
+
+
+	#even if the result is not good, we will add it and let queue sorting takes care of it
+	color_queue.add(color_set, current_error)
+	color_queue.pretty_print()
+
+	return current_error, color_set, last_change
+
+
+
+if __name__ == "__main__":
+
+	percentage, colors, outfile, infiles, posterizeonly, idleiterations, saveworkimages, partial = get_args()
+
+	print "Posterizing only: ", posterizeonly
+
+	max_error = 0.5
+
+	#test
+	test_v = randint (10,250)
+	print " {} -> {} -> {}".format(test_v, shrink(test_v), expand(shrink(test_v)))
+	if not test_v == expand(shrink(test_v)):
+		sys.exit()
+
+	cv = ChannelValues()
+
+	for file_tmp in infiles:
+
+		print "Doing: {}".format(file_tmp)
+
+		inimage = misc.imread(file_tmp)
+		if percentage != 100:
+			inimage = misc.imresize(inimage, percentage)
+			print " ... resizing to {}%, new dimensions: {}x{}".format(percentage, inimage.shape[0], inimage.shape[1])
+
+		work_image = ArrayImage(inimage)
+		work_image.set_output_filename(file_tmp.rsplit('.',1)[0])
+
+
+		color_queue = ColorQueue(colors)
+		#color_set = ColorSet(get_random_colors(colors))
+
+
+		print " Clipped amount: {}".format(work_image.error_sum)
+
+		last_change = 0
+		action = "initial"
+		action_results = defaultdict(int)
+		queue_pos = -1
+		for x in range(2000):
+
+
+			current_error, color_set, last_change = run(color_queue, work_image, last_change, x)
+
+
+			if x - last_change > idleiterations:
+				print " * processing of {} done ....".format(file_tmp)
+				break
+
+
+
+
+		print action_results
 
 
 
