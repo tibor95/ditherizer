@@ -11,6 +11,7 @@ import operator
 from collections import defaultdict
 from multiprocessing import Process, Lock, Queue
 import traceback
+from os.path import isdir
 
 class ChannelValues():
 	def __init__(self):
@@ -31,7 +32,7 @@ class ChannelValues():
 		raise ValueError("ColorValues error")
 
 class ArrayImage():
-	def __init__(self, image, read_only = False):
+	def __init__(self, image, read_only = False, output_dir = None):
 		#importing content of image into 3d array
 		self.x = image.shape[0]
 		self.y = image.shape[1]
@@ -44,6 +45,7 @@ class ArrayImage():
 		self.outsuffix = ".png"
 		self.work_files_counter = 0
 		self.final_colors_stat = {}
+		self.output_dir = output_dir
 		for x_tmp in range(self.x):
 			if x_tmp % 100 == 0:
 				print " importing: ",x_tmp
@@ -75,9 +77,12 @@ class ArrayImage():
 		return "{}_{}".format(self.outfile, len(self.work_colors))
 
 	def get_output_filename(self, color_set, work_folder = False):
-		if work_folder == False:
-			return "{}_{}.{}".format(self.outfile, color_set.count(), self.outsuffix)
-		return "{}/{}_{}_{:>03}.{}".format(self.get_out_folder(), self.outfile, len(self.work_colors), self.work_files_counter, self.outsuffix)
+		bare_name = "{}_{}.{}".format(self.outfile, color_set.count(), self.outsuffix)
+		if work_folder == True:
+			return "{}/{}".format(self.outfile, bare_name)
+		if not self.output_dir is None:
+			return "{}/{}".format(self.output_dir, bare_name)
+		return bare_name
 
 	def dither(self, color_set, quiet = False):
 		color_set.reset_colors_count()
@@ -256,12 +261,15 @@ class ColorPreview():
 		self.R = color.get_big_tuple()[0]
 		self.G = color.get_big_tuple()[1]
 		self.B = color.get_big_tuple()[2]
+		self.frame_color = (0,0,0)
+		if self.R < 50 and self.G < 50 and self.B < 50:
+			self.frame_color = (200, 200, 200)
 		self.border_thick = self.size / 15
 	def render(self):
 		for x in range(0, self.size + 1):
 			for y in range(0, self.size + 1):
 				if x < self.border_thick or self.size - x < self.border_thick or y < self.border_thick or self.size - y < self.border_thick:
-					yield self.starting_x + x, self.starting_y + y,(0,0,0)
+					yield self.starting_x + x, self.starting_y + y, self.frame_color
 				else:
 					yield self.starting_x + x, self.starting_y + y,(self.R, self.G, self.B)
 
@@ -302,7 +310,7 @@ class ColorSet():
 
 			rgb = self.colors[col_to_mutate].get_big_tuple()
 			new_rgb = self.mutate_rgb_tupple(rgb)
-			print " Mutating {}: {}  ->  {}".format(col_to_mutate, rgb, new_rgb)
+			print "  Mutating {}: {}  ->  {}".format(col_to_mutate, rgb, new_rgb)
 			self.colors[col_to_mutate] = ColorValues(new_rgb)
 		else:
 			#mutating existing color
@@ -431,6 +439,8 @@ def get_args():
 	parser.add_argument(
 		'-o', '--outfile', type=str, default="output")
 	parser.add_argument(
+		'-d', '--outdir', help ="target directory for output files", type=str, default="dithered_images")
+	parser.add_argument(
 		'-s', '--saveworkimages', action = "store_true", default = False)
 	parser.add_argument(
 		'-A', '--partial', action = "store_true", default = False)
@@ -449,8 +459,9 @@ def get_args():
 	saveworkimages = args.saveworkimages
 	partial = args.partial
 	threads = args.threads
+	outdir = args.outdir
 
-	return percentage, colors, outfile, infile, idleiterations, saveworkimages, partial, threads
+	return percentage, colors, outfile, infile, idleiterations, saveworkimages, partial, threads, outdir
 
 def get_nearest_distance(col1, colors):
 	best_diff = 0
@@ -508,15 +519,25 @@ def run(color_queue, work_image, last_change, x, save_lock, thread_id, q, cv, pa
 
 		q.put((color_set, current_error, changed))
 	except Exception as e:
-		print "Run() failed with: ",str(e)
-		traceback.print_exc()
-		q.put(e)
+		with save_lock:
+			print "Run() failed with: ",str(e)
+			traceback.print_exc()
+			q.put(e)
+	except KeyboardInterrupt:
+		q.put(False)
 
 
 
 if __name__ == "__main__":
 
-	percentage, colors, outfile, infiles, idleiterations, saveworkimages, partial, threads = get_args()
+	percentage, colors, outfile, infiles, idleiterations, saveworkimages, partial, threads, outdir = get_args()
+
+	if not isdir(outdir):
+		try:
+			os.mkdir(outdir)
+		except Exception as e:
+			print "ERROR: {} not created: {}".format(outdir, str(e))
+			sys.exit()
 
 	#print "Posterizing only: ", posterizeonly
 
@@ -541,7 +562,7 @@ if __name__ == "__main__":
 			inimage = misc.imresize(inimage, percentage)
 			print " ... resizing to {}%, new dimensions: {}x{}".format(percentage, inimage.shape[0], inimage.shape[1])
 
-		work_image = ArrayImage(inimage)
+		work_image = ArrayImage(inimage, output_dir = outdir)
 		work_image.set_output_filename(file_tmp.rsplit('.',1)[0])
 
 		color_queue = ColorQueue(colors, Lock(), cv)
@@ -562,9 +583,9 @@ if __name__ == "__main__":
 				p.start()
 			for p in procs:
 				result = q.get()
-				if isinstance(result, Exception):
+				if isinstance(result, Exception) or result is False:
 					with save_lock:
-						print "Got exception, quitting...."
+						print "Thread executin failed...."
 					sys.exit()
 				color_set, current_error, changed = result
 				#print "From queue: ", color_set, current_error
