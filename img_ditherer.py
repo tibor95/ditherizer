@@ -3,7 +3,7 @@ import numpy
 import argparse
 from itertools import combinations_with_replacement, permutations, product
 #from colormath.color_diff import delta_e_cie2000
-from random import randint, choice, shuffle
+from random import randint, choice, shuffle, sample
 import sys
 import copy
 import os
@@ -18,16 +18,24 @@ class ChannelValues():
 		self.data = {key+1:expand(value) for key, value in enumerate(map(lambda x: float(x)/19, range(20)))}
 	def get_random(self):
 		return self.data[randint(1,len(self.data))]
-	def get_neighbours(self, value):
+	def get_neighbours(self, value, scope = "both"):
+		assert scope in ["both", "down", "upper"]
+		scope_items = []
+		if scope in ["both", "upper"]:
+			scope_items.extend([1, 2, 3, 4, 5])
+		if scope in ["both", "down"]:
+			scope_items.extend([-5, -4, -3, -2, -1])
+		assert len(scope_items) > 0
+		#print "DEBUG scope items ", scope, scope_items
 		for k,v in self.data.iteritems():
 			if value == v:
 				results = []
-				for x in [-5, -4, -3, -2, -1, 1, 2, 3, 4, 5]:
+				for x in scope_items:
 					try:
 						results.append(self.data[k + x])
 					except:
 						pass
-
+				#print "DEBUG2 results: ", results
 				return results
 		raise ValueError("ColorValues error")
 
@@ -335,67 +343,79 @@ class ColorSet():
 			return least_pos
 		return None
 
-	def print_colors(self, image_size, extra_text = "", force = False):
+	def print_colors(self, image_size = None, extra_text = "", force = False):
 		for i, col in enumerate(self.iterate()):
-			#if least_frequency > col.count:
-			#	least_frequency = col.count
 			if self.verbosity > 0 or force == True:
-				print "  {} {:>2} {:<13} :{:>8}   {:>5.2f}%".format(extra_text, i, col, col.count,
-																   100 * float(col.count) / image_size)
+				if not image_size is None:
+					percentage = "{:>5.2f}%".format(100 * float(col.count) / image_size)
+				else:
+					percentage = ""
+				print "  {} {:>2} {:<13} :{:>8}   {}".format(extra_text, i, col, col.count,
+																   percentage)
 
 	def mutate(self, img_size):
 		if self.verbosity > 0:
 			print "  Mutation source: {}".format(self.colors)
 
-		preferred_candidate = self.get_lowest_freq_color(operator.le, tresh=img_size / len(self.colors) / 3)
-		#self.get_lowest_freq_color(operator.ge, tresh=self.x * self.y / len(self.final_colors) / 3)
+		least_frequent_color = self.get_lowest_freq_color(operator.le, tresh=img_size / len(self.colors) / 3)
+		most_frequent_color = self.get_lowest_freq_color(operator.ge)
 
-		if preferred_candidate is None or randint(0,3) == 0:
-			#mutating random color
-			col_to_mutate = randint(0, len(self.colors) - 1)
-			#channel_to_mutate = randint(0, 2)
-
-			rgb = self.colors[col_to_mutate].get_big_tuple()
-			new_rgb = self.mutate_rgb_tupple(rgb)
-			if self.verbosity > 0:
-				print "  Mutating color {}: {}  ->  {}".format(col_to_mutate, rgb, new_rgb)
-			self.colors[col_to_mutate] = ColorValues(new_rgb)
+		if not least_frequent_color is None and randint(0,3) == 0:
+			#mutatig most frequent into least frequent position
+			self.colors[least_frequent_color] \
+				= ColorValues(self.mutate_rgb_tupples([self.colors[most_frequent_color].get_big_tuple()])[0])
+			print "  1/1 Mutating {}: {}  -> {}: {}".format(most_frequent_color, self.colors[most_frequent_color],
+															least_frequent_color, self.colors[least_frequent_color])
 		else:
-			#mutating existing color
-			if randint(0,1) == 0:
-				source_color = self.get_lowest_freq_color(operator.ge)
-				if source_color == preferred_candidate:
-					print "Data error,color with least and lowest frequency is the same: {} == {}".format(str(source_color), str(preferred_candidate))
-					self.print_colors(img_size, force = True)
-					raise ValueError("algorithm error")
-			else:
-				source_color = preferred_candidate
+			colors_to_mutate = sample(set(range(len(self.colors))),randint(1,2))
+			assert len(colors_to_mutate) in [1,2]
+			result = self.mutate_rgb_tupples([self.colors[col].get_big_tuple() for col in colors_to_mutate])
+			assert len(colors_to_mutate) == len(result), "Colors to mutate: {}, result: {}".format(colors_to_mutate, result)
+			for pos, col in enumerate(colors_to_mutate):
+				col_val = ColorValues(result[pos])
+				print "  {}/{} Mutating {}: {}  ->  {}".format(pos + 1, len(colors_to_mutate), col, self.colors[col], col_val)
+				self.colors[col] = col_val
 
-			rgb = self.colors[source_color].get_big_tuple()
-			new_rgb = self.mutate_rgb_tupple(rgb)
-			if self.verbosity > 0:
-				if source_color != preferred_candidate:
-					print " Mutating {} -> {}: {}  ->  {}".format(source_color, preferred_candidate, rgb, new_rgb)
-				else:
-					print " Mutating color {}: {}  ->  {}".format(preferred_candidate, rgb, new_rgb)
-			self.colors[preferred_candidate] = ColorValues(new_rgb)
-		#do we have natural candidate?
 	def color_exists(self, color):
 		for col in self.colors:
 			if col == color:
 				return True
 		return False
-	def mutate_rgb_tupple(self, old_rgb):
+	def mutate_rgb_tupples(self, old_rgbs):
 		#new_rgb = list(old_rgb)
 		src = [0, 1, 2]
 		shuffle(src)
 		channels_to_mutate = src[:choice([1, 1, 1, 2, 2, 3])]
-		for x in range(20):
+		new_rgbs = []
+		for i,old_rgb in enumerate(old_rgbs):
+			#for x in range(20):
+			new_rgb = list(old_rgb)
 			for ch in channels_to_mutate:
-				new_rgb = list(old_rgb)
-				new_rgb[ch] = choice(self.cv.get_neighbours(new_rgb[ch]))
-				if not self.color_exists(new_rgb):
-					return tuple(new_rgb)
+
+				if len(old_rgbs) == 1:
+					second_arg = "both"
+				elif i == 0:
+					second_arg = "upper"
+				else:
+					second_arg = "down"
+
+				options = self.cv.get_neighbours(new_rgb[ch], second_arg)
+				shuffle(options)
+				if len(options) != 0:
+					new_rgb[ch] = options
+
+			#print "DEBUG, channels to mutate: {}, rgbs count: {} ".format(channels_to_mutate, len(old_rgbs)),old_rgb, " -> ", new_rgb
+
+			new_rgb = map(lambda x: [x] if isinstance(x, int) else x, new_rgb)
+			for possible_rgb in [(r,g,b) for r in new_rgb[0] for g in new_rgb[1] for b in new_rgb[2] ]:
+				if not self.color_exists(possible_rgb):
+					new_rgbs.append(possible_rgb)
+					break
+			else:
+				print "We dont have good candidate to mutate {}".format(old_rgb)
+				new_rgbs.append(old_rgb)
+			assert len(new_rgbs) == i + 1 ,"Size of new_rgbs: {}, iteration: {}/{}".format(len(new_rgbs), i + 1, len(old_rgbs))
+		return new_rgbs
 
 	def reset_colors_count(self):
 		for col in self.colors:
@@ -553,7 +573,7 @@ def run(color_queue, work_image, last_change, x, save_lock, thread_id, q, cv, pa
 		queue_pos = randint(0,3)
 		color_set = color_queue.get(queue_pos)
 		color_set.verbosity = verbosity
-		print "DEBUG ", verbosity, color_set.verbosity
+
 		#if color_set == False: # no mutation freshely generated colors
 		if color_set.statistics_exist():
 			color_set.mutate(work_image.x * work_image.y)
@@ -573,7 +593,7 @@ def run(color_queue, work_image, last_change, x, save_lock, thread_id, q, cv, pa
 		with save_lock:
 			color_set.print_colors(work_image.x * work_image.y, extra_text = " TH:{}".format(thread_id))
 			current_error = float(work_image.error_sum) / work_image.x / work_image.y
-			print "  TH:{} Actual error: {:.3f}% (best: {:.3f}, last change: {:>2} ago, queue pos: {})".\
+			print "  TH:{} Actual error: {:.04}% (best: {:.04f}, last change: {:>2} ago, queue pos: {})".\
 				format(thread_id, current_error, color_queue.get_best_diff(), x - last_change, queue_pos)
 			if current_error < color_queue.get_best_diff():
 				work_image.save_new_image(color_set, partial = partial)
