@@ -296,11 +296,24 @@ class ColorPreview():
 				else:
 					yield self.starting_x + x, self.starting_y + y,(self.R, self.G, self.B)
 
+# class MonitoredList(list):
+# 	def __init__(self, init_channels, cb):
+# 		self.cb = cb
+# 		super(MonitoredList, self).__init__(init_channels)
+# 	def __setitem__(self, index, value):
+# 		self.cb()
+# 		super(MonitoredList, self).__setitem__(index, value)
+# 	def __iter__(self):
+# 		return super(MonitoredList, self).__iter__()
 
 class ColorSet():
 	def __init__(self, colors, cv):
 		self.colors = colors
 		self.cv = cv
+		self.verbosity = 0
+		#self.original_colors = True
+	#def set_non_original(self):
+	#	self.original_colors = False
 	def __str__(self):
 		return "[{}]".format(", ".join([str(col) for col in self.colors]))
 	def iterate(self):
@@ -317,11 +330,22 @@ class ColorSet():
 				least_freq = v.count
 				least_pos = k
 		if comparator(least_freq, tresh):
-			print "  returning {} on pos: {}, freq.: {}, tresh: {}".format(comp_str, least_pos, least_freq, tresh)
+			if self.verbosity > 1:
+				print "  returning {} on pos: {}, freq.: {}, tresh: {}".format(comp_str, least_pos, least_freq, tresh)
 			return least_pos
 		return None
+
+	def print_colors(self, image_size, extra_text = "", force = False):
+		for i, col in enumerate(self.iterate()):
+			#if least_frequency > col.count:
+			#	least_frequency = col.count
+			if self.verbosity > 0 or force == True:
+				print "  {} {:>2} {:<13} :{:>8}   {:>5.2f}%".format(extra_text, i, col, col.count,
+																   100 * float(col.count) / image_size)
+
 	def mutate(self, img_size):
-		print "  Mutation source: {}".format(self.colors)
+		if self.verbosity > 0:
+			print "  Mutation source: {}".format(self.colors)
 
 		preferred_candidate = self.get_lowest_freq_color(operator.le, tresh=img_size / len(self.colors) / 3)
 		#self.get_lowest_freq_color(operator.ge, tresh=self.x * self.y / len(self.final_colors) / 3)
@@ -333,24 +357,27 @@ class ColorSet():
 
 			rgb = self.colors[col_to_mutate].get_big_tuple()
 			new_rgb = self.mutate_rgb_tupple(rgb)
-			print "  Mutating {}: {}  ->  {}".format(col_to_mutate, rgb, new_rgb)
+			if self.verbosity > 0:
+				print "  Mutating color {}: {}  ->  {}".format(col_to_mutate, rgb, new_rgb)
 			self.colors[col_to_mutate] = ColorValues(new_rgb)
 		else:
 			#mutating existing color
 			if randint(0,1) == 0:
 				source_color = self.get_lowest_freq_color(operator.ge)
 				if source_color == preferred_candidate:
-					print "ERROR: {} == {}".format(str(source_color), str(preferred_candidate))
-					sys.exit()
+					print "Data error,color with least and lowest frequency is the same: {} == {}".format(str(source_color), str(preferred_candidate))
+					self.print_colors(img_size, force = True)
+					raise ValueError("algorithm error")
 			else:
 				source_color = preferred_candidate
 
 			rgb = self.colors[source_color].get_big_tuple()
 			new_rgb = self.mutate_rgb_tupple(rgb)
-			if source_color != preferred_candidate:
-				print " Mutating {} -> {}: {}  ->  {}".format(source_color, preferred_candidate, rgb, new_rgb)
-			else:
-				print " Mutating {}: {}  ->  {}".format(preferred_candidate, rgb, new_rgb)
+			if self.verbosity > 0:
+				if source_color != preferred_candidate:
+					print " Mutating {} -> {}: {}  ->  {}".format(source_color, preferred_candidate, rgb, new_rgb)
+				else:
+					print " Mutating color {}: {}  ->  {}".format(preferred_candidate, rgb, new_rgb)
 			self.colors[preferred_candidate] = ColorValues(new_rgb)
 		#do we have natural candidate?
 	def color_exists(self, color):
@@ -373,6 +400,11 @@ class ColorSet():
 	def reset_colors_count(self):
 		for col in self.colors:
 			col.count = 0
+	def statistics_exist(self):
+		for col in self.colors:
+			if col.count > 0:
+				return True
+		return False
 
 class ColorQueue():
 	def __init__(self, color_set_colors_count, lock, cv, size = 5):
@@ -396,8 +428,8 @@ class ColorQueue():
 			return  1000000
 		return self.queue[0]["diff"]
 	def get(self, position = 0):
-		if len(self.queue) == 0:
-			print "Color_queue is still empty, generating random colors"
+		if len(self.queue) < min(self.size, 3):
+			print "Size of Color_queue is below treshold, generating random colors"
 			return ColorSet(self.get_random_colors(self.color_set_colors_count), self.cv)
 		if position >= len(self.queue):
 			print "   Position {} > length of queue: {}, returning position 0".format(position, len(self.queue))
@@ -469,6 +501,8 @@ def get_args():
 		'-A', '--partial', action = "store_true", default = False)
 	parser.add_argument(
 		'-f', '--infile', required = True, type=str, nargs='+')
+	parser.add_argument("-v", "--verbosity", action="count",
+						help="increase output verbosity", default = 0)
 	#parser.add_argument("-P", "--posterizeonly", action = "store_true", default = False)
 
 
@@ -483,8 +517,9 @@ def get_args():
 	partial = args.partial
 	threads = args.threads
 	outdir = args.outdir
+	verbosity = args.verbosity
 
-	return percentage, colors, outfile, infile, idleiterations, saveworkimages, partial, threads, outdir
+	return percentage, colors, outfile, infile, idleiterations, saveworkimages, partial, threads, outdir, verbosity
 
 def get_nearest_distance(col1, colors):
 	best_diff = 0
@@ -498,7 +533,7 @@ def get_nearest_distance(col1, colors):
 
 
 
-def run(color_queue, work_image, last_change, x, save_lock, thread_id, q, cv, partial, saveworkimages):
+def run(color_queue, work_image, last_change, x, save_lock, thread_id, q, cv, partial, saveworkimages, verbosity):
 	# Takes:
 	# copy of workimage
 	# copy of colorset
@@ -506,30 +541,37 @@ def run(color_queue, work_image, last_change, x, save_lock, thread_id, q, cv, pa
 	# modified colorset
 	# modified workimage
 
+
 	try:
-		with save_lock:
-			print " * {:>3}/{}".format(x, thread_id)
+		ColorSet.verbosity = verbosity
+		if verbosity > 0:
+			with save_lock:
+				print " * {:>3}/{}".format(x, thread_id)
+		elif thread_id == 0:
+			print " * iteration {:>3}".format(x)
 		# preparing for iteration
 		queue_pos = randint(0,3)
 		color_set = color_queue.get(queue_pos)
-		if x > 0: # no mutation on first iteration
+		color_set.verbosity = verbosity
+		print "DEBUG ", verbosity, color_set.verbosity
+		#if color_set == False: # no mutation freshely generated colors
+		if color_set.statistics_exist():
 			color_set.mutate(work_image.x * work_image.y)
+		else:
+			if verbosity > 0:
+				print "  Do not mutating..."
 		action = "mutate"
+
+
 
 		work_image.error_sum = 0
 		work_image.clean_errors()
 		work_image.dither(color_set, quiet = True)
-		#least_used = -1
-		least_frequency = 100000
+		#least_frequency = 100000
 		changed = False
 
 		with save_lock:
-			for i, col in enumerate(color_set.iterate()):
-				if least_frequency > col.count:
-					least_frequency = col.count
-					least_used = i
-				print "  TH:{} {:>2} {:<13} :{:>8}   {:>5.2f}%".format(thread_id, i, col, col.count, 100 * float(col.count) / work_image.x / work_image.y)
-			#print " [{:>3}] Achieved {} vs. needed:  {}".format(x, least_frequency, float(work_image.x) * work_image.y / 2 / colors)
+			color_set.print_colors(work_image.x * work_image.y, extra_text = " TH:{}".format(thread_id))
 			current_error = float(work_image.error_sum) / work_image.x / work_image.y
 			print "  TH:{} Actual error: {:.3f}% (best: {:.3f}, last change: {:>2} ago, queue pos: {})".\
 				format(thread_id, current_error, color_queue.get_best_diff(), x - last_change, queue_pos)
@@ -553,7 +595,7 @@ def run(color_queue, work_image, last_change, x, save_lock, thread_id, q, cv, pa
 
 if __name__ == "__main__":
 
-	percentage, colors, outfile, infiles, idleiterations, saveworkimages, partial, threads, outdir = get_args()
+	percentage, colors, outfile, infiles, idleiterations, saveworkimages, partial, threads, outdir, verbosity = get_args()
 
 	if not isdir(outdir):
 		try:
@@ -563,6 +605,8 @@ if __name__ == "__main__":
 			sys.exit()
 
 	#print "Posterizing only: ", posterizeonly
+
+	ColorSet.verbosity = verbosity
 
 	max_error = 0.5
 
@@ -578,9 +622,8 @@ if __name__ == "__main__":
 
 	for file_tmp in infiles:
 
-		print "Doing: {}".format(file_tmp)
-
 		inimage = misc.imread(file_tmp)
+		print "Doing: {} ({}x{}px)".format(file_tmp, inimage.shape[0], inimage.shape[1])
 		if percentage != 100:
 			inimage = misc.imresize(inimage, percentage)
 			print " ... resizing to {}%, new dimensions: {}x{}".format(percentage, inimage.shape[0], inimage.shape[1])
@@ -601,14 +644,14 @@ if __name__ == "__main__":
 		for x in range(2000):
 
 			procs = [Process(target=run, args=(color_queue, copy.deepcopy(work_image), last_change, x,
-											   save_lock, i, q, cv, partial, saveworkimages,)) for i in range(threads)]
+											   save_lock, i, q, cv, partial, saveworkimages, verbosity)) for i in range(threads)]
 			for p in procs:
 				p.start()
 			for p in procs:
 				result = q.get()
 				if isinstance(result, Exception) or result is False:
 					with save_lock:
-						print "Thread executin failed...."
+						print "Thread execution failed...."
 					sys.exit()
 				color_set, current_error, changed = result
 				#print "From queue: ", color_set, current_error
