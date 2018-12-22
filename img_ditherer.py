@@ -46,9 +46,9 @@ class ArrayImage():
 		self.work_files_counter = 0
 		self.final_colors_stat = {}
 		self.output_dir = output_dir
+		progress_bar = ProgressBar(" importing image ", self.x)
 		for x_tmp in range(self.x):
-			if x_tmp % 100 == 0:
-				print " importing: ",x_tmp
+			progress_bar.update(x_tmp)
 			for y_tmp in range(self.y):
 				rgb_tuple = image[x_tmp, y_tmp]
 				self.data[x_tmp][y_tmp][0] = shrink(rgb_tuple[0])#col_obj.lab_l
@@ -163,9 +163,11 @@ class ArrayImage():
 		if work_folder is True:
 			target_destination = self.get_output_filename(work_folder = True)
 
+		progress_bar = ProgressBar("  @ exporting to {}".format(target_destination), self.x)
 		for x in range(0, self.x):
-			if x % 200 == 0:
-				print " @ exporting {} : {}/{}".format(target_destination, x, self.x)
+			progress_bar.update(x)
+			#if x % 200 == 0:
+			#	print " @ exporting {} : {}/{}".format(target_destination, x, self.x)
 			for y in range(0, self.y):
 				if partial == True and (y < self.y / 10 or y > self.y * 9 / 10):
 					self.new_image[x, y, 0] = expand(self.data[x][y][0])
@@ -192,6 +194,27 @@ class ArrayImage():
 				self.data[x, y, 3] = 0
 				self.data[x, y, 4] = 0
 				self.data[x, y, 5] = 0
+
+
+class ProgressBar():
+	def __init__(self, text, total):
+		self.text = "{}".format(text)
+		self.state = 0
+		self.total = total
+	def update(self, current):
+		due = current * 10 / self.total
+		if due > self.state:
+			new_line = '\n'
+			if due<9:
+				new_line = '\r'
+			sys.stdout.write('{} [{:<10}]{}'.format(self.text, '#' * (due+1), new_line))
+			sys.stdout.flush()
+			self.state = due
+
+
+
+
+
 
 def get_diff(col1, col2):
 	total = pow(col1[0] - col2[0], 2)# * (1+weights[0])
