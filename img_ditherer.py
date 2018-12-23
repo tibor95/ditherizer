@@ -14,10 +14,10 @@ import traceback
 from os.path import isdir
 
 class ChannelValues():
-	def __init__(self):
-		self.data = {key+1:expand(value) for key, value in enumerate(map(lambda x: float(x)/19, range(20)))}
+	def __init__(self, grades = 20):
+		self.data = {key+1:expand(value) for key, value in enumerate(map(lambda x: float(x)/(grades - 1), range(grades)))}
 	def get_random(self):
-		return self.data[randint(1,len(self.data))]
+		return self.data[randint(1,len(self.data))] #dictionary starts with key 1
 	def get_neighbours(self, value, scope = "both"):
 		assert scope in ["both", "down", "upper"]
 		scope_items = []
@@ -113,7 +113,7 @@ class ArrayImage():
 	def clip(self, x,y):
 		for pos in [3,4,5]:
 			#print self.data[x][y][pos]
-			max_error = 1
+			max_error = 3
 			self.error_sum += abs(self.data[x][y][pos])
 			if self.data[x][y][pos] > 1 + max_error:
 				self.data[x][y][pos] = 1 + max_error
@@ -221,13 +221,19 @@ class ProgressBar():
 
 
 
-
-
-
 def get_diff(col1, col2):
-	total = pow(col1[0] - col2[0], 2)# * (1+weights[0])
-	total += pow(col1[1] - col2[1], 2)# * (1+weights[1])
-	total += pow(col1[2] - col2[2], 2)# * (1+weights[2])
+	assert len(col1) == len(col2)
+	if len(col1) == 3:
+		total = pow(col1[0] - col2[0], 2)# * (1+weights[0])
+		total += pow(col1[1] - col2[1], 2)# * (1+weights[1])
+		total += pow(col1[2] - col2[2], 2)# * (1+weights[2])
+		return total
+	assert len(col1) == 4
+	#so we got extended tuple where first item is avg (~brightness)
+	total = pow((col1[0] - col2[0]) / 2, 2)
+	total += pow(col1[1] - col2[1], 2)
+	total += pow(col1[2] - col2[2], 2)
+	total += pow(col1[3] - col2[3], 2)
 	return total
 
 def shrink(value):
@@ -412,7 +418,7 @@ class ColorSet():
 					new_rgbs.append(possible_rgb)
 					break
 			else:
-				print "We dont have good candidate to mutate {}".format(old_rgb)
+				print "   We dont have good candidate to mutate {}".format(old_rgb)
 				new_rgbs.append(old_rgb)
 			assert len(new_rgbs) == i + 1 ,"Size of new_rgbs: {}, iteration: {}/{}".format(len(new_rgbs), i + 1, len(old_rgbs))
 		return new_rgbs
@@ -544,7 +550,8 @@ def get_args():
 def get_nearest_distance(col1, colors):
 	best_diff = 0
 	for col in colors:
-		diff = get_diff(col1.get_small_tuple(), col.get_small_tuple())
+		#diff = get_diff(col1.get_small_tuple(), col.get_small_tuple())
+		diff = get_diff(col1.get_extended_small_tuple(), col.get_extended_small_tuple())
 		if diff > best_diff:
 			best_diff = diff
 	return best_diff
@@ -593,7 +600,7 @@ def run(color_queue, work_image, last_change, x, save_lock, thread_id, q, cv, pa
 		with save_lock:
 			color_set.print_colors(work_image.x * work_image.y, extra_text = " TH:{}".format(thread_id))
 			current_error = float(work_image.error_sum) / work_image.x / work_image.y
-			print "  TH:{} Actual error: {:.04}% (best: {:.04f}, last change: {:>2} ago, queue pos: {})".\
+			print "  TH:{} Actual error: {:.4}% (best: {:.4f}, last change: {:>2} ago, queue pos: {})".\
 				format(thread_id, current_error, color_queue.get_best_diff(), x - last_change, queue_pos)
 			if current_error < color_queue.get_best_diff():
 				work_image.save_new_image(color_set, partial = partial)
@@ -653,13 +660,10 @@ if __name__ == "__main__":
 
 		color_queue = ColorQueue(colors, Lock(), cv)
 
-		#print " Clipped amount: {}".format(work_image.error_sum)
-
 		last_change = 0
 		action = "initial"
-		action_results = defaultdict(int)
 		queue_pos = -1
-
+		diff_stat = []
 
 		for x in range(2000):
 
@@ -681,13 +685,13 @@ if __name__ == "__main__":
 					if changed == True:
 						last_change = x
 			color_queue.pretty_print()
+			diff_stat.append(color_queue.get_best_diff())
 
 			if x - last_change > idleiterations / threads:
 				print " * processing of {} done ....".format(file_tmp)
 				break
 
 
-		print action_results
 
 
 
