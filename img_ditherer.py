@@ -51,7 +51,7 @@ class ArrayImage():
 		self.error_sum = 0
 		self.outfile = "output"
 		self.outsuffix = ".png"
-		self.work_files_counter = 0
+		#self.work_files_counter = 0
 		self.final_colors_stat = {}
 		self.output_dir = output_dir
 		progress_bar = ProgressBar(" importing image ", self.x)
@@ -84,13 +84,20 @@ class ArrayImage():
 	def get_out_folder(self):
 		return "{}_{}".format(self.outfile, len(self.work_colors))
 
-	def get_output_filename(self, color_set, work_folder = False):
-		bare_name = "{}_{}.{}".format(self.outfile, color_set.count(), self.outsuffix)
-		if work_folder == True:
-			return "{}/{}".format(self.outfile, bare_name)
+	def get_output_dir(self, color_set, work_folder = False):
+		outdir = []
 		if not self.output_dir is None:
-			return "{}/{}".format(self.output_dir, bare_name)
-		return bare_name
+			outdir.append("{}".format(self.output_dir))
+		if work_folder == True:
+			outdir.append("{}_{}".format(self.outfile, color_set.count()))
+		return '/'.join(outdir)
+
+	def get_output_filename(self, color_set, work_folder = False, iteration = None):
+		iteration_str = ""
+		if not iteration is None:
+			iteration_str = '_{:>03}'.format(iteration)
+		bare_name = "{}_{}{}.{}".format(self.outfile, color_set.count(), iteration_str,self.outsuffix)
+		return '/'.join([self.get_output_dir(color_set, work_folder), bare_name])
 
 	def dither(self, color_set, quiet = False):
 		color_set.reset_colors_count()
@@ -162,29 +169,34 @@ class ArrayImage():
 		self.data[x][y][7] = color_tupple[1]
 		self.data[x][y][8] = color_tupple[2]
 
-	def save_new_image(self,color_set, work_folder = False, partial = False):
-		if work_folder is True and not os.path.exists(work_image.get_out_folder()):
-			os.makedirs(work_image.get_out_folder())
+	def save_new_image(self, color_set, work_folder = False, partial = False, iteration = None):
 		self.new_image = self.image.copy()
+		target_path = self.get_output_dir(color_set, work_folder=work_folder)
+		target_file_with_path = self.get_output_filename(color_set, work_folder=work_folder, iteration = iteration)
 
-		target_destination = self.get_output_filename(color_set)
-		if work_folder is True:
-			target_destination = self.get_output_filename(work_folder = True)
+		if not os.path.exists(target_path):
+			os.makedirs(target_path)
 
-		progress_bar = ProgressBar("  @ exporting to {}".format(target_destination), self.x)
+		progress_bar = ProgressBar("  @ exporting to {}".format(target_file_with_path), self.x)
 		for x in range(0, self.x):
 			progress_bar.update(x)
-			#if x % 200 == 0:
-			#	print " @ exporting {} : {}/{}".format(target_destination, x, self.x)
 			for y in range(0, self.y):
-				if partial == True and (y < self.y / 10 or y > self.y * 9 / 10):
-					self.new_image[x, y, 0] = expand(self.data[x][y][0])
-					self.new_image[x, y, 1] = expand(self.data[x][y][1])
-					self.new_image[x, y, 2] = expand(self.data[x][y][2])
-				else:
-					self.new_image[x, y, 0] = expand(self.data[x][y][6])
-					self.new_image[x, y, 1] = expand(self.data[x][y][7])
-					self.new_image[x, y, 2] = expand(self.data[x][y][8])
+				if partial == True:
+					break1 = self.y / 10
+					break2 = self.y * 9 / 10
+					if (y < break1 or y > break2):
+						self.new_image[x, y, 0] = expand(self.data[x][y][0])
+						self.new_image[x, y, 1] = expand(self.data[x][y][1])
+						self.new_image[x, y, 2] = expand(self.data[x][y][2])
+						continue
+					elif y == break1 or y == break2:
+						self.new_image[x, y, 0] = 0
+						self.new_image[x, y, 1] = 0
+						self.new_image[x, y, 2] = 0
+						continue
+				self.new_image[x, y, 0] = expand(self.data[x][y][6])
+				self.new_image[x, y, 1] = expand(self.data[x][y][7])
+				self.new_image[x, y, 2] = expand(self.data[x][y][8])
 
 		#now exporting color previews
 		for pos, color in enumerate(color_set.iterate()):
@@ -194,7 +206,7 @@ class ArrayImage():
 				self.new_image[renderdata[0], renderdata[1], 1] = renderdata[2][1]
 				self.new_image[renderdata[0], renderdata[1], 2] = renderdata[2][2]
 
-		misc.imsave(target_destination, self.new_image)
+		misc.imsave(target_file_with_path, self.new_image)
 
 	def clean_errors(self):
 		for x in range(0, self.x):
@@ -587,9 +599,6 @@ def run(color_queue, work_image, last_change, x, save_lock, thread_id, q, cv, pa
 		else:
 			if verbosity > 0:
 				print "  Do not mutating..."
-		action = "mutate"
-
-
 
 		work_image.error_sum = 0
 		work_image.clean_errors()
@@ -600,13 +609,13 @@ def run(color_queue, work_image, last_change, x, save_lock, thread_id, q, cv, pa
 		with save_lock:
 			color_set.print_colors(work_image.x * work_image.y, extra_text = " TH:{}".format(thread_id))
 			current_error = float(work_image.error_sum) / work_image.x / work_image.y
-			print "  TH:{} Actual error: {:.4}% (best: {:.4f}, last change: {:>2} ago, queue pos: {})".\
-				format(thread_id, current_error, color_queue.get_best_diff(), x - last_change, queue_pos)
+			print "  TH:{} Actual error: {:.4}% ({:+.4f}, last change: {:>2} ago, queue pos: {})".\
+				format(thread_id, current_error, current_error - color_queue.get_best_diff(), x - last_change, queue_pos)
 			if current_error < color_queue.get_best_diff():
 				work_image.save_new_image(color_set, partial = partial)
 				if saveworkimages == True:
-					work_image.save_new_image(color_set, work_folder = True, partial = partial)
-					work_image.work_files_counter += 1
+					work_image.save_new_image(color_set, work_folder = True, partial = partial, iteration = x)
+					#work_image.work_files_counter += 1
 				changed = True
 
 		q.put((color_set, current_error, changed))
