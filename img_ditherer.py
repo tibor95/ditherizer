@@ -1,14 +1,14 @@
 from scipy import misc
 import numpy
 import argparse
-from itertools import combinations_with_replacement, permutations, product
+#from itertools import combinations_with_replacement, permutations, product
 #from colormath.color_diff import delta_e_cie2000
 from random import randint, choice, shuffle, sample
 import sys
 import copy
 import os
 import operator
-from collections import defaultdict
+#from collections import defaultdict
 from multiprocessing import Process, Lock, Queue
 import traceback
 from os.path import isdir
@@ -40,19 +40,19 @@ class ChannelValues():
 		raise ValueError("ColorValues error")
 
 class ArrayImage():
-	def __init__(self, image, read_only = False, output_dir = None):
+	def __init__(self, image, output_dir = None):
 		#importing content of image into 3d array
 		self.x = image.shape[0]
 		self.y = image.shape[1]
 		self.c = 9
-		self.read_only = read_only
+		#self.read_only = read_only
 		self.data = numpy.zeros((self.x, self.y, self.c))
 		self.image = image
 		self.error_sum = 0
 		self.outfile = "output"
 		self.outsuffix = ".png"
 		#self.work_files_counter = 0
-		self.final_colors_stat = {}
+		#self.final_colors_stat = {}
 		self.output_dir = output_dir
 		progress_bar = ProgressBar(" importing image ", self.x)
 		for x_tmp in range(self.x):
@@ -69,10 +69,10 @@ class ArrayImage():
 				self.data[x_tmp][y_tmp][7] = 0
 				self.data[x_tmp][y_tmp][8] = 0
 
-	def populate_work_statistics(self):
-		self.work_colors_stat = {}
-		for i, col in enumerate(self.work_colors):
-			self.work_colors_stat[i] = col.count
+	#def populate_work_statistics(self):
+	#	self.work_colors_stat = {}
+	#	for i, col in enumerate(self.work_colors):
+	#		self.work_colors_stat[i] = col.count
 		#print "Final colors stat: ", self.final_colors_stat
 
 	def set_output_filename(self, name):
@@ -81,8 +81,8 @@ class ArrayImage():
 		self.outfile = name
 		self.outsuffix = 'png'
 
-	def get_out_folder(self):
-		return "{}_{}".format(self.outfile, len(self.work_colors))
+	#def get_out_folder(self):
+	#	return "{}_{}".format(self.outfile, len(self.work_colors))
 
 	def get_output_dir(self, color_set, work_folder = False):
 		outdir = []
@@ -282,9 +282,9 @@ class ColorValues():
 		self.b_diff = self.b - self.avg
 	def copy(self):
 		return type(self)(self.R, self.G, self.B)
-	def reset_channel(self, channel, value):
-		setattr(self, channel, value)
-		self.recalculate_from_big()
+	#def reset_channel(self, channel, value):
+	#	setattr(self, channel, value)
+	#	self.recalculate_from_big()
 	def get_small_tuple(self):
 		return (self.r, self.g, self.b)
 
@@ -670,7 +670,7 @@ if __name__ == "__main__":
 		color_queue = ColorQueue(colors, Lock(), cv)
 
 		last_change = 0
-		action = "initial"
+		#action = "initial"
 		queue_pos = -1
 		diff_stat = []
 
