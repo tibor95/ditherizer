@@ -517,32 +517,34 @@ def get_args():
 	'''This function parses and return arguments passed in'''
 	# Assign description to the help doc
 	parser = argparse.ArgumentParser(
-		description="image ditherer")
+		description="Image ditherer, looking for optimal unique colors so that errors are as minimal as possible")
 
 	# Add arguments
 
 	parser.add_argument(
-		'-c', '--colors', type=int, default = 5)
+		'-c', '--colors', type=int, help = "unique colors for final image", default = 5)
 	parser.add_argument(
-		'-t', '--threads', type=int, default = 2)
+		'-t', '--threads', type=int, help = "threads count", default = 2)
 	parser.add_argument(
-		'-p', '--percentage', type=int, default = 100)
+		'-p', '--percentage', type=int, help = "for resizing the image, default 100. "
+											   "Smaller images are processed faster of course", default = 100)
 	parser.add_argument(
-		'-i', '--idleiterations', type=int, default = 75)
+		'-i', '--idleiterations', type=int, help = "The script terminates if n iterations brought no improvement."
+												   " Default = 75. Actually it waits iterations/threads iterations.", default = 75)
 	parser.add_argument(
-		'-o', '--outfile', type=str, default="output")
+		'-o', '--outfile', type=str, help = "does not work for now", default="output")
 	parser.add_argument(
 		'-d', '--outdir', help ="target directory for output files", type=str, default="dithered_images")
 	parser.add_argument(
-		'-s', '--saveworkimages', action = "store_true", default = False)
+		'-s', '--saveworkimages', action = "store_true", help = "save work images "
+																"(after iteration that brough improvement)", default = False)
 	parser.add_argument(
-		'-A', '--partial', action = "store_true", default = False)
+		'-A', '--partial', action = "store_true", help = "Leave strips of original image on the sides for comparison",default = False)
 	parser.add_argument(
-		'-f', '--infile', required = True, type=str, nargs='+')
+		'-f', '--infile', required = True, help = "one of more images that will be processed", type=str, nargs='+')
 	parser.add_argument("-v", "--verbosity", action="count",
 						help="increase output verbosity", default = 0)
 	#parser.add_argument("-P", "--posterizeonly", action = "store_true", default = False)
-
 
 	args = parser.parse_args()
 	colors = args.colors
