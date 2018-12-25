@@ -69,20 +69,11 @@ class ArrayImage():
 				self.data[x_tmp][y_tmp][7] = 0
 				self.data[x_tmp][y_tmp][8] = 0
 
-	#def populate_work_statistics(self):
-	#	self.work_colors_stat = {}
-	#	for i, col in enumerate(self.work_colors):
-	#		self.work_colors_stat[i] = col.count
-		#print "Final colors stat: ", self.final_colors_stat
-
 	def set_output_filename(self, name):
 		if name.endswith('.png') or name.endswith('.jpg'):
 			name = name[:-3]
 		self.outfile = name
 		self.outsuffix = 'png'
-
-	#def get_out_folder(self):
-	#	return "{}_{}".format(self.outfile, len(self.work_colors))
 
 	def get_output_dir(self, color_set, work_folder = False):
 		outdir = []
@@ -113,9 +104,7 @@ class ArrayImage():
 												self.data[x_tmp][y_tmp][2] + self.data[x_tmp][y_tmp][5],
 												color_set)
 				self.set_new_color(x_tmp, y_tmp, best_col)
-				#if posterizeonly == False:
 				self.propagate_errors(x_tmp, y_tmp)
-		#print "dithering is over"
 
 	def clip(self, x,y):
 		for pos in [3,4,5]:
@@ -135,15 +124,25 @@ class ArrayImage():
 			[1,0,7],
 			[1,1,1],
 			[0,1,5],
-			[-1,1,3]
-		],
+			[-1,1,3]],
 			1: [
 			[1,0,1],
 			[1,1,1],
 			[0,1,1]],
+			2: [
+			[1,0,5],
+			[1,1,1],
+			[0,1,4],
+			[-1,1,4],
+			[-2,1,4]],
+			3: [
+			[1, 0, 3],
+			[1, 1, 1],
+			[0, 1, 1],
+			[-1, 1, 1]]
 		}
-		total_weight = sum([item[2] for item in propagation_sample[(x+y)%2]])
-		for item in propagation_sample[(x+y)%2]:
+		total_weight = sum([item[2] for item in propagation_sample[(x+y)%len(propagation_sample)]])
+		for item in propagation_sample[(x+y)%len(propagation_sample)]:
 			weight = float(item[2]) / total_weight
 			self.push_errors(x + item[0], y + item[1], r_diff * weight, g_diff * weight, b_diff * weight)
 
@@ -282,9 +281,7 @@ class ColorValues():
 		self.b_diff = self.b - self.avg
 	def copy(self):
 		return type(self)(self.R, self.G, self.B)
-	#def reset_channel(self, channel, value):
-	#	setattr(self, channel, value)
-	#	self.recalculate_from_big()
+
 	def get_small_tuple(self):
 		return (self.r, self.g, self.b)
 
@@ -322,24 +319,13 @@ class ColorPreview():
 				else:
 					yield self.starting_x + x, self.starting_y + y,(self.R, self.G, self.B)
 
-# class MonitoredList(list):
-# 	def __init__(self, init_channels, cb):
-# 		self.cb = cb
-# 		super(MonitoredList, self).__init__(init_channels)
-# 	def __setitem__(self, index, value):
-# 		self.cb()
-# 		super(MonitoredList, self).__setitem__(index, value)
-# 	def __iter__(self):
-# 		return super(MonitoredList, self).__iter__()
 
 class ColorSet():
 	def __init__(self, colors, cv):
 		self.colors = colors
 		self.cv = cv
 		self.verbosity = 0
-		#self.original_colors = True
-	#def set_non_original(self):
-	#	self.original_colors = False
+
 	def __str__(self):
 		return "[{}]".format(", ".join([str(col) for col in self.colors]))
 	def iterate(self):
@@ -646,7 +632,7 @@ if __name__ == "__main__":
 
 	ColorSet.verbosity = verbosity
 
-	max_error = 0.5
+	#max_error = 0.5
 
 	#test
 	test_v = randint (10,250)
