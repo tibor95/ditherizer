@@ -575,7 +575,7 @@ def run(color_queue, work_image, last_change, x, save_lock, thread_id, q, cv, pa
 			with save_lock:
 				print " * {:>3}/{}".format(x, thread_id)
 		elif thread_id == 0:
-			print " * iteration {:>3}".format(x)
+			print " * iteration {:>3}, last change {} iterations ago".format(x, x - last_change)
 		# preparing for iteration
 		queue_pos = randint(0,3)
 		color_set = color_queue.get(queue_pos)
@@ -597,8 +597,8 @@ def run(color_queue, work_image, last_change, x, save_lock, thread_id, q, cv, pa
 		with save_lock:
 			color_set.print_colors(work_image.x * work_image.y, extra_text = " TH:{}".format(thread_id))
 			current_error = float(work_image.error_sum) / work_image.x / work_image.y
-			print "  TH:{} Actual error: {:.4}% ({:+.4f}, last change: {:>2} ago, queue pos: {})".\
-				format(thread_id, current_error, current_error - color_queue.get_best_diff(), x - last_change, queue_pos)
+			print "  TH:{} Actual error: {:.4}% ({:+.4f}, parent queue pos: {})".\
+				format(thread_id, current_error, current_error - color_queue.get_best_diff(), queue_pos)
 			if current_error < color_queue.get_best_diff():
 				work_image.save_new_image(color_set, partial = partial)
 				if saveworkimages == True:
