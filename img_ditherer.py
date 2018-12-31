@@ -112,8 +112,10 @@ class ArrayImage():
 			max_error = 3
 			self.error_sum += abs(self.data[x][y][pos])
 			if self.data[x][y][pos] > 1 + max_error:
+				print "Clipping: {}".format(self.data[x][y][pos] - 1 - max_error)
 				self.data[x][y][pos] = 1 + max_error
 			if self.data[x][y][pos] < -max_error:
+				print "Clipping: {}".format(self.data[x][y][pos] + max_error)
 				self.data[x][y][pos] = -max_error
 
 	def propagate_errors(self, x, y):
@@ -308,7 +310,7 @@ class ColorPreview():
 		self.G = color.get_big_tuple()[1]
 		self.B = color.get_big_tuple()[2]
 		self.frame_color = (0,0,0)
-		if self.R < 50 and self.G < 50 and self.B < 50:
+		if self.R < 80 and self.G < 80 and self.B < 80:
 			self.frame_color = (200, 200, 200)
 		self.border_thick = self.size / 15
 	def render(self):
@@ -321,10 +323,11 @@ class ColorPreview():
 
 
 class ColorSet():
-	def __init__(self, colors, cv):
+	def __init__(self, colors, cv, min_sat):
 		self.colors = colors
 		self.cv = cv
 		self.verbosity = 0
+		self.min_sat = min_sat
 
 	def __str__(self):
 		return "[{}]".format(", ".join([str(col) for col in self.colors]))
@@ -385,6 +388,12 @@ class ColorSet():
 			if col == color:
 				return True
 		return False
+
+	def get_saturations(self, color):
+		max_value = shrink(max(color))
+		min_value = shrink(min(color))
+		return max_value - min_value
+
 	def mutate_rgb_tupples(self, old_rgbs):
 		#new_rgb = list(old_rgb)
 		src = [0, 1, 2]
@@ -412,7 +421,7 @@ class ColorSet():
 
 			new_rgb = map(lambda x: [x] if isinstance(x, int) else x, new_rgb)
 			for possible_rgb in [(r,g,b) for r in new_rgb[0] for g in new_rgb[1] for b in new_rgb[2] ]:
-				if not self.color_exists(possible_rgb):
+				if not self.color_exists(possible_rgb) and self.get_saturations(possible_rgb) > self.min_sat:
 					new_rgbs.append(possible_rgb)
 					break
 			else:
@@ -431,12 +440,13 @@ class ColorSet():
 		return False
 
 class ColorQueue():
-	def __init__(self, color_set_colors_count, lock, cv, size = 5):
+	def __init__(self, color_set_colors_count, lock, min_sat, cv, size = 5):
 		self.queue = []
 		self.size = size
 		self.color_set_colors_count = color_set_colors_count
 		self.lock = lock
 		self.cv = cv
+		self.min_sat = min_sat
 	def add(self, colorset, diff):
 		if not isinstance(diff, float):
 			print "diff must be float"
@@ -454,7 +464,7 @@ class ColorQueue():
 	def get(self, position = 0):
 		if len(self.queue) < min(self.size, 3):
 			print "Size of Color_queue is below treshold, generating random colors"
-			return ColorSet(self.get_random_colors(self.color_set_colors_count), self.cv)
+			return ColorSet(self.get_random_colors(self.color_set_colors_count), self.cv, self.min_sat)
 		if position >= len(self.queue):
 			print "   Position {} > length of queue: {}, returning position 0".format(position, len(self.queue))
 			position = 0
@@ -530,7 +540,7 @@ def get_args():
 		'-f', '--infile', required = True, help = "one of more images that will be processed", type=str, nargs='+')
 	parser.add_argument("-v", "--verbosity", action="count",
 						help="increase output verbosity", default = 0)
-	#parser.add_argument("-P", "--posterizeonly", action = "store_true", default = False)
+	parser.add_argument("-m", "--minsat", type = float, default = 0, help = "minimal saturation")
 
 	args = parser.parse_args()
 	colors = args.colors
@@ -544,8 +554,9 @@ def get_args():
 	threads = args.threads
 	outdir = args.outdir
 	verbosity = args.verbosity
+	minsat = args.minsat
 
-	return percentage, colors, outfile, infile, idleiterations, saveworkimages, partial, threads, outdir, verbosity
+	return percentage, colors, outfile, infile, idleiterations, saveworkimages, partial, threads, outdir, verbosity, minsat
 
 def get_nearest_distance(col1, colors):
 	best_diff = 0
@@ -619,7 +630,11 @@ def run(color_queue, work_image, last_change, x, save_lock, thread_id, q, cv, pa
 
 if __name__ == "__main__":
 
-	percentage, colors, outfile, infiles, idleiterations, saveworkimages, partial, threads, outdir, verbosity = get_args()
+	percentage, colors, outfile, infiles, idleiterations, saveworkimages,\
+	partial, threads, outdir, verbosity, min_sat = get_args()
+
+	if min_sat > 0.2:
+		min_sat = 0.2
 
 	if not isdir(outdir):
 		try:
@@ -632,13 +647,10 @@ if __name__ == "__main__":
 
 	ColorSet.verbosity = verbosity
 
-	#max_error = 0.5
-
 	#test
 	test_v = randint (10,250)
-	print " {} -> {} -> {}".format(test_v, shrink(test_v), expand(shrink(test_v)))
-	if not test_v == expand(shrink(test_v)):
-		sys.exit()
+	#print " {} -> {} -> {}".format(test_v, shrink(test_v), expand(shrink(test_v)))
+	assert test_v == expand(shrink(test_v))
 
 	cv = ChannelValues()
 	save_lock = Lock()
@@ -655,7 +667,7 @@ if __name__ == "__main__":
 		work_image = ArrayImage(inimage, output_dir = outdir)
 		work_image.set_output_filename(file_tmp.rsplit('.',1)[0])
 
-		color_queue = ColorQueue(colors, Lock(), cv)
+		color_queue = ColorQueue(colors, Lock(), min_sat, cv)
 
 		last_change = 0
 		#action = "initial"
