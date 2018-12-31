@@ -62,7 +62,7 @@ class ArrayImage():
 				self.data[x_tmp][y_tmp][0] = shrink(rgb_tuple[0])#col_obj.lab_l
 				self.data[x_tmp][y_tmp][1] = shrink(rgb_tuple[1])#col_obj.lab_a
 				self.data[x_tmp][y_tmp][2] = shrink(rgb_tuple[2])#col_obj.lab_b
-				self.data[x_tmp][y_tmp][3] = 0#diffs
+				self.data[x_tmp][y_tmp][3] = 0#diffs, first the leftover from previously processed, then actual
 				self.data[x_tmp][y_tmp][4] = 0
 				self.data[x_tmp][y_tmp][5] = 0
 				self.data[x_tmp][y_tmp][6] = 0#result
@@ -105,12 +105,33 @@ class ArrayImage():
 												color_set)
 				self.set_new_color(x_tmp, y_tmp, best_col)
 				self.propagate_errors(x_tmp, y_tmp)
+				self.set_posprocess_diff(x_tmp, y_tmp)
+
+	def set_posprocess_diff(self, x, y):
+		for pos in [3, 4, 5]:
+			self.data[x][y][pos] = self.data[x][y][pos + 3] - self.data[x][y][pos - 3]
+
+	def get_local_error(self, x, y, pos):
+		current_error = abs(self.data[x][y][pos])
+		square_error = 0
+		for x_tmp in [x, x+1]:
+			for y_tmp in [y, y+1]:
+				try:
+					square_error += self.data[x_tmp][y_tmp][pos]
+				except:
+					pass
+		square_error = abs(square_error)
+		#if square_error < current_error:
+		#	print "ERRORS: {} vs {}".format(current_error, square_error)
+		return min(current_error, square_error)
+
 
 	def clip(self, x,y):
 		for pos in [3,4,5]:
 			#print self.data[x][y][pos]
 			max_error = 3
-			self.error_sum += abs(self.data[x][y][pos])
+			self.error_sum +=self.get_local_error(x,y,pos)
+			#self.error_sum += abs(self.data[x][y][pos])
 			if self.data[x][y][pos] > 1 + max_error:
 				print "Clipping: {}".format(self.data[x][y][pos] - 1 - max_error)
 				self.data[x][y][pos] = 1 + max_error
@@ -635,6 +656,7 @@ if __name__ == "__main__":
 
 	if min_sat > 0.2:
 		min_sat = 0.2
+	print "Minimal saturation: {}".format(min_sat)
 
 	if not isdir(outdir):
 		try:
