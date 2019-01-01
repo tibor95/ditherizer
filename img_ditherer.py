@@ -13,6 +13,64 @@ from multiprocessing import Process, Lock, Queue
 import traceback
 from os.path import isdir
 
+class Runner(object):
+	def __init__(self, image_file, color_queue, partial):
+		self.tmp_file = image_file
+		self.partial = partial
+		self.color_queue = color_queue
+		self.pass_step = 0
+
+	def generate_dithered_img(self, percentage):
+		work_image = self.get_work_image(percentage)
+		work_image.dither(self.color_queue.get(), quiet=True)
+		work_image.set_output_filename(self.tmp_file.rsplit('.', 1)[0])
+		work_image.save_new_image(self.color_queue.get(), partial=self.partial)
+
+	def get_work_image(self, percentage):
+		self.inimage = misc.imread(self.tmp_file)
+		print "Doing: {} pass: {} ({}x{}px)".format(self.tmp_file, self.pass_step, self.inimage.shape[0], self.inimage.shape[1])
+		if percentage != 100:
+			self.inimage = misc.imresize(self.inimage, percentage)
+			print " ... resizing to {}%, new dimensions: {}x{}".format(percentage, self.inimage.shape[0], self.inimage.shape[1])
+		return ArrayImage(self.inimage, output_dir = outdir)
+
+	def run(self, percentage, iterations, diff_malus):
+		self.pass_step += 1
+		work_image = self.get_work_image(percentage)
+		work_image.set_output_filename(file_tmp.rsplit('.',1)[0])
+
+		last_change = 0
+		#action = "initial"
+		queue_pos = -1
+		diff_stat = []
+
+		for x in range(iterations):
+
+			procs = [Process(target=run, args=(color_queue, copy.deepcopy(work_image), last_change, x,
+											   save_lock, i, q, cv, self.partial, saveworkimages, verbosity, self.pass_step)) for i in range(threads)]
+			for p in procs:
+				p.start()
+			for p in procs:
+				result = q.get()
+				if isinstance(result, Exception) or result is False:
+					with save_lock:
+						print "Thread execution failed...."
+					sys.exit()
+				color_set, current_error, changed = result
+				current_error *= diff_malus
+				#print "From queue: ", color_set, current_error
+				p.join()
+				with save_lock:
+					self.color_queue.add(color_set, current_error)
+					if changed == True:
+						last_change = x
+			self.color_queue.pretty_print()
+			diff_stat.append(self.color_queue.get_best_diff())
+
+			if x - last_change > idleiterations / threads:
+				print " * processing of {} done ....".format(file_tmp)
+				break
+
 class ChannelValues():
 	def __init__(self, grades = 20):
 		self.data = {key+1:expand(value) for key, value in enumerate(map(lambda x: float(x)/(grades - 1), range(grades)))}
@@ -83,11 +141,14 @@ class ArrayImage():
 			outdir.append("{}_{}".format(self.outfile, color_set.count()))
 		return '/'.join(outdir)
 
-	def get_output_filename(self, color_set, work_folder = False, iteration = None):
+	def get_output_filename(self, color_set, work_folder = False, iteration = None, pass_step = None):
 		iteration_str = ""
 		if not iteration is None:
 			iteration_str = '_{:>03}'.format(iteration)
-		bare_name = "{}_{}{}.{}".format(self.outfile, color_set.count(), iteration_str,self.outsuffix)
+		pass_str = ""
+		if not pass_step is None:
+			pass_str = '_{}'.format(pass_step)
+		bare_name = "{}_{}{}{}.{}".format(self.outfile, color_set.count(), pass_str, iteration_str, self.outsuffix)
 		return '/'.join([self.get_output_dir(color_set, work_folder), bare_name])
 
 	def dither(self, color_set, quiet = False):
@@ -191,10 +252,11 @@ class ArrayImage():
 		self.data[x][y][7] = color_tupple[1]
 		self.data[x][y][8] = color_tupple[2]
 
-	def save_new_image(self, color_set, work_folder = False, partial = False, iteration = None):
+	def save_new_image(self, color_set, work_folder = False, partial = False, iteration = None, pass_step = None):
 		self.new_image = self.image.copy()
 		target_path = self.get_output_dir(color_set, work_folder=work_folder)
-		target_file_with_path = self.get_output_filename(color_set, work_folder=work_folder, iteration = iteration)
+		target_file_with_path = self.get_output_filename(color_set, work_folder=work_folder, iteration = iteration,
+														 pass_step = pass_step)
 
 		if not os.path.exists(target_path):
 			os.makedirs(target_path)
@@ -222,7 +284,8 @@ class ArrayImage():
 
 		#now exporting color previews
 		for pos, color in enumerate(color_set.iterate()):
-			cp = ColorPreview(pos, color, self.x)
+			#print "DEBUG ",color_set.count()
+			cp = ColorPreview(pos, color, self.x, color_set.count())
 			for renderdata in cp.render():
 				self.new_image[renderdata[0], renderdata[1], 0] = renderdata[2][0]
 				self.new_image[renderdata[0], renderdata[1], 1] = renderdata[2][1]
@@ -252,7 +315,6 @@ class ProgressBar():
 			sys.stdout.write('{} [{:<10}]{}'.format(self.text, '#' * (due+1), new_line))
 			sys.stdout.flush()
 			self.state = due
-
 
 
 def get_diff(col1, col2):
@@ -323,10 +385,12 @@ class ColorValues():
 		return "{:>03}|{:>03}|{:>03}".format(self.R, self.G, self.B)
 
 class ColorPreview():
-	def __init__(self, order, color, x_size):
-		self.size = 20
+	def __init__(self, order, color, x_size, color_count):
+		self.size = min(25, x_size / color_count / 2)
+		self.colors_count = color_count
 		self.starting_x = x_size - 25 - self.size
-		self.starting_y = 25 * (order + 1)
+		self.starting_y = (self.size + 5) * (order + 1)
+		#print "DEBUG ", self.starting_x, self.starting_y
 		self.R = color.get_big_tuple()[0]
 		self.G = color.get_big_tuple()[1]
 		self.B = color.get_big_tuple()[2]
@@ -589,10 +653,7 @@ def get_nearest_distance(col1, colors):
 	return best_diff
 
 
-
-
-
-def run(color_queue, work_image, last_change, x, save_lock, thread_id, q, cv, partial, saveworkimages, verbosity):
+def run(color_queue, work_image, last_change, x, save_lock, thread_id, q, cv, partial, saveworkimages, verbosity, pass_step):
 	# Takes:
 	# copy of workimage
 	# copy of colorset
@@ -607,7 +668,7 @@ def run(color_queue, work_image, last_change, x, save_lock, thread_id, q, cv, pa
 			with save_lock:
 				print " * {:>3}/{}".format(x, thread_id)
 		elif thread_id == 0:
-			print " * iteration {:>3}, last change {} iterations ago".format(x, x - last_change)
+			print " * iteration {:>3} in pass {}, last change {} iterations ago".format(x, pass_step, x - last_change)
 		# preparing for iteration
 		queue_pos = randint(0,3)
 		color_set = color_queue.get(queue_pos)
@@ -634,7 +695,8 @@ def run(color_queue, work_image, last_change, x, save_lock, thread_id, q, cv, pa
 			if current_error < color_queue.get_best_diff():
 				work_image.save_new_image(color_set, partial = partial)
 				if saveworkimages == True:
-					work_image.save_new_image(color_set, work_folder = True, partial = partial, iteration = x)
+					work_image.save_new_image(color_set, work_folder = True, partial = partial,
+											  iteration = x, pass_step = pass_step)
 					#work_image.work_files_counter += 1
 				changed = True
 
@@ -646,7 +708,6 @@ def run(color_queue, work_image, last_change, x, save_lock, thread_id, q, cv, pa
 			q.put(e)
 	except KeyboardInterrupt:
 		q.put(False)
-
 
 
 if __name__ == "__main__":
@@ -680,47 +741,14 @@ if __name__ == "__main__":
 
 	for file_tmp in infiles:
 
-		inimage = misc.imread(file_tmp)
-		print "Doing: {} ({}x{}px)".format(file_tmp, inimage.shape[0], inimage.shape[1])
-		if percentage != 100:
-			inimage = misc.imresize(inimage, percentage)
-			print " ... resizing to {}%, new dimensions: {}x{}".format(percentage, inimage.shape[0], inimage.shape[1])
-
-		work_image = ArrayImage(inimage, output_dir = outdir)
-		work_image.set_output_filename(file_tmp.rsplit('.',1)[0])
-
 		color_queue = ColorQueue(colors, Lock(), min_sat, cv)
+		runner = Runner(file_tmp, color_queue, partial)
+		runner.run(percentage/4, 20, 1.04)
+		runner.run(percentage/2, 20, 1.02)
+		runner.generate_dithered_img(percentage)
+		runner.run(percentage, 1000, 1)
 
-		last_change = 0
-		#action = "initial"
-		queue_pos = -1
-		diff_stat = []
 
-		for x in range(2000):
-
-			procs = [Process(target=run, args=(color_queue, copy.deepcopy(work_image), last_change, x,
-											   save_lock, i, q, cv, partial, saveworkimages, verbosity)) for i in range(threads)]
-			for p in procs:
-				p.start()
-			for p in procs:
-				result = q.get()
-				if isinstance(result, Exception) or result is False:
-					with save_lock:
-						print "Thread execution failed...."
-					sys.exit()
-				color_set, current_error, changed = result
-				#print "From queue: ", color_set, current_error
-				p.join()
-				with save_lock:
-					color_queue.add(color_set, current_error)
-					if changed == True:
-						last_change = x
-			color_queue.pretty_print()
-			diff_stat.append(color_queue.get_best_diff())
-
-			if x - last_change > idleiterations / threads:
-				print " * processing of {} done ....".format(file_tmp)
-				break
 
 
 
