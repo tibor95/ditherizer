@@ -14,14 +14,23 @@ import traceback
 from os.path import isdir
 
 class Runner(object):
-	def __init__(self, image_file, color_queue, partial):
+	def __init__(self, image_file, color_queue, partial, required_percentage, megapixels):
 		self.tmp_file = image_file
 		self.partial = partial
 		self.color_queue = color_queue
 		self.pass_step = 0
+		if megapixels is None:
+			self.percentage = required_percentage / 100.0
+		else:
+			inimage = misc.imread(self.tmp_file)
+			orig_size = inimage.shape[0] * inimage.shape[1]
+			self.percentage = pow(1000000 * megapixels / orig_size, 0.5)
+			print "Converting image with size {} target megapixels {} to {} percentage".format(orig_size, megapixels, self.percentage)
+		assert self.percentage > 0.05
+		assert self.percentage < 3
 
-	def generate_dithered_img(self, percentage):
-		work_image = self.get_work_image(percentage)
+	def generate_dithered_img(self, relative_percentage):
+		work_image = self.get_work_image(relative_percentage * self.percentage)
 		work_image.dither(self.color_queue.get(), quiet=True)
 		work_image.set_output_filename(self.tmp_file.rsplit('.', 1)[0])
 		work_image.save_new_image(self.color_queue.get(), partial=self.partial)
@@ -34,9 +43,11 @@ class Runner(object):
 			print " ... resizing to {}%, new dimensions: {}x{}".format(percentage, self.inimage.shape[0], self.inimage.shape[1])
 		return ArrayImage(self.inimage, output_dir = outdir)
 
-	def run(self, percentage, iterations, diff_malus):
+	def run(self, relative_percentage, iterations, diff_malus):
 		self.pass_step += 1
-		work_image = self.get_work_image(percentage)
+		final_percentage = self.percentage * relative_percentage
+		assert final_percentage >= 0.01
+		work_image = self.get_work_image(self.percentage * relative_percentage)
 		work_image.set_output_filename(file_tmp.rsplit('.',1)[0])
 
 		last_change = 0
@@ -606,9 +617,12 @@ def get_args():
 		'-c', '--colors', type=int, help = "unique colors for final image", default = 5)
 	parser.add_argument(
 		'-t', '--threads', type=int, help = "threads count", default = 2)
-	parser.add_argument(
+	group = parser.add_mutually_exclusive_group()
+	group.add_argument(
 		'-p', '--percentage', type=int, help = "for resizing the image, default 100. "
 											   "Smaller images are processed faster of course", default = 100)
+	group.add_argument(
+		'-M', '--megapixels', type=float, help = "size of final image", default = None)
 	parser.add_argument(
 		'-i', '--idleiterations', type=int, help = "The script terminates if n iterations brought no improvement."
 												   " Default = 75. Actually it waits iterations/threads iterations.", default = 75)
@@ -640,8 +654,10 @@ def get_args():
 	outdir = args.outdir
 	verbosity = args.verbosity
 	minsat = args.minsat
+	megapixels = args.megapixels
 
-	return percentage, colors, outfile, infile, idleiterations, saveworkimages, partial, threads, outdir, verbosity, minsat
+	return percentage, colors, outfile, infile, idleiterations,\
+		   saveworkimages, partial, threads, outdir, verbosity, minsat, megapixels
 
 def get_nearest_distance(col1, colors):
 	best_diff = 0
@@ -712,8 +728,8 @@ def run(color_queue, work_image, last_change, x, save_lock, thread_id, q, cv, pa
 
 if __name__ == "__main__":
 
-	percentage, colors, outfile, infiles, idleiterations, saveworkimages,\
-	partial, threads, outdir, verbosity, min_sat = get_args()
+	required_percentage, colors, outfile, infiles, idleiterations, saveworkimages,\
+	partial, threads, outdir, verbosity, min_sat, megapixels = get_args()
 
 	if min_sat > 0.2:
 		min_sat = 0.2
@@ -742,11 +758,11 @@ if __name__ == "__main__":
 	for file_tmp in infiles:
 
 		color_queue = ColorQueue(colors, Lock(), min_sat, cv)
-		runner = Runner(file_tmp, color_queue, partial)
-		runner.run(percentage/4, 20, 1.04)
-		runner.run(percentage/2, 20, 1.02)
-		runner.generate_dithered_img(percentage)
-		runner.run(percentage, 1000, 1)
+		runner = Runner(file_tmp, color_queue, partial, required_percentage, megapixels)
+		runner.run(0.25, 20, 1.1)
+		runner.run(0.5, 20, 1.05)
+		runner.generate_dithered_img(1)
+		runner.run(1, 1000, 1)
 
 
 
